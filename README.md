@@ -20,7 +20,7 @@ go run cmd/manager/main.go --canary <CANARY-BATCH-SIZE> --target-label <EXISTING
 ```
 
 ## How to plug your tests in?
-A part from some basic checks regarding the status of the resources it deploys for you, Streamline does not define validating test for you resources. That responsibility is yours.\
+A part from some basic checks regarding the status of the resources it deploys for you, Rooster does not define validating test for you resources. That responsibility is yours.\
 Nonetheless, Rooster would execute a properly compiled Golang test binary and return the output in the command line.\
 To use your specific test, please do the following:\
 1. build your test file
@@ -57,6 +57,6 @@ go test -v rooster/pkg/tests
 * Consider keeping backup files in a more reliable & available location: bitbucket, s3, etc...
 * Improve the support for multiple daemonsets. So far multiple daemonsets can be released at once, as long as they define the same labels in their affinity context.
 * ~~Validate the canary-label by making sure it does not exist on any node in the cluster before going any further (Early failure policy).~~
-* Idempotency, deterministic behavior. Rooster will be run as a controller from inside the cluster, as operator/controller, in the future. (same idea of deployment-controller over replicaset. streamlinear can work as a controller for daemonset)
+* Idempotency, deterministic behavior. Rooster will be run as a controller from inside the cluster, as operator/controller, in the future. (same idea of deployment-controller over replicaset. Rooster can work as a controller for daemonset)
 * Improve the backup folder logic, and set backup files to be kept in different folders, based off the date, cluster name, etc...
 * Add the ability to trigger a rollback on demand
