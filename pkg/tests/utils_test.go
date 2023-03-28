@@ -55,7 +55,7 @@ func (suite *StreamlinerUtilsTest) TestShellScript() {
 	result, err := utils.Shell(cmd)
 	assert.Nil(suite.T(), err)
 	assert.NotEmpty(suite.T(), result)
-	assert.Contains(suite.T(), result, "Open-Streamliner/pkg/tests")
+	assert.Contains(suite.T(), result, "Rooster/pkg/tests")
 }
 
 func (suite *StreamlinerUtilsTest) TestDeleteService() {
