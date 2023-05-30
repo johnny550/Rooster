@@ -12,7 +12,7 @@ import (
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type StreamlinerUtilsTest struct {
+type RoosterUtilsTest struct {
 	suite.Suite
 }
 
@@ -30,13 +30,13 @@ type plural struct {
 	Resource string
 }
 
-func (suite *StreamlinerUtilsTest) SetupSuite() {
+func (suite *RoosterUtilsTest) SetupSuite() {
 	fmt.Println(" SetupSuite")
 	customDeleteOptions.DryRun = append(customDeleteOptions.DryRun, "All")
 	fmt.Printf("customDeleteOptions: %v\n", customDeleteOptions)
 }
 
-func (suite *StreamlinerUtilsTest) TestGroupVersionGuess() {
+func (suite *RoosterUtilsTest) TestGroupVersionGuess() {
 	apiVersion := "v1"
 	kind := "pod"
 	expectedResult := plural{}
@@ -50,15 +50,15 @@ func (suite *StreamlinerUtilsTest) TestGroupVersionGuess() {
 	assert.Equal(suite.T(), expectedResult.Resource, val.Resource)
 }
 
-func (suite *StreamlinerUtilsTest) TestShellScript() {
+func (suite *RoosterUtilsTest) TestShellScript() {
 	cmd := "pwd"
 	result, err := utils.Shell(cmd)
 	assert.Nil(suite.T(), err)
 	assert.NotEmpty(suite.T(), result)
-	assert.Contains(suite.T(), result, "Open-Streamliner/pkg/tests")
+	assert.Contains(suite.T(), result, "Rooster/pkg/tests")
 }
 
-func (suite *StreamlinerUtilsTest) TestDeleteService() {
+func (suite *RoosterUtilsTest) TestDeleteService() {
 	m, err := utils.New("")
 	assert.Nil(suite.T(), err)
 	// Get services
@@ -74,7 +74,7 @@ func (suite *StreamlinerUtilsTest) TestDeleteService() {
 	assert.Nil(suite.T(), err)
 }
 
-func (suite *StreamlinerUtilsTest) TestDeleteServiceAccount() {
+func (suite *RoosterUtilsTest) TestDeleteServiceAccount() {
 	m, err := utils.New("")
 	assert.Nil(suite.T(), err)
 	// Get service accounts
@@ -90,7 +90,7 @@ func (suite *StreamlinerUtilsTest) TestDeleteServiceAccount() {
 	assert.Nil(suite.T(), err)
 }
 
-func (suite *StreamlinerUtilsTest) TestDeleteConfigMap() {
+func (suite *RoosterUtilsTest) TestDeleteConfigMap() {
 	m, err := utils.New("")
 	assert.Nil(suite.T(), err)
 	// Get config maps
@@ -106,7 +106,7 @@ func (suite *StreamlinerUtilsTest) TestDeleteConfigMap() {
 	assert.Nil(suite.T(), err)
 }
 
-func (suite *StreamlinerUtilsTest) TestDeleteDaemonSet() {
+func (suite *RoosterUtilsTest) TestDeleteDaemonSet() {
 	m, err := utils.New("")
 	assert.Nil(suite.T(), err)
 	// Get daemon sets
@@ -122,12 +122,12 @@ func (suite *StreamlinerUtilsTest) TestDeleteDaemonSet() {
 	assert.Nil(suite.T(), err)
 }
 
-func (suite *StreamlinerUtilsTest) TestCreate() {
+func (suite *RoosterUtilsTest) TestCreate() {
 	customCreateOptions := meta_v1.CreateOptions{}
 	customCreateOptions.DryRun = append(customCreateOptions.DryRun, "All")
 }
 
 func TestUtils(t *testing.T) {
-	s := new(StreamlinerUtilsTest)
+	s := new(RoosterUtilsTest)
 	suite.Run(t, s)
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2023 The Streamliner Authors.
+Copyright 2023 The Rooster Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ func main() {
 
 func defineRevertNeed() bool {
 	var response string
-	fmt.Println("Should Streamliner revert the recent changes? (y/n)")
+	fmt.Println("Should Rooster revert the recent changes? (y/n)")
 	fmt.Scanln(&response)
 	return strings.EqualFold(response, "Y")
 }
