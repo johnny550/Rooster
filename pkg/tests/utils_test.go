@@ -29,7 +29,7 @@ import (
 	core_v1 "k8s.io/api/core/v1"
 )
 
-type RoosterUtilsTest struct {
+type StreamlinerUtilsTest struct {
 	suite.Suite
 }
 
@@ -39,14 +39,14 @@ type plural struct {
 	Resource string
 }
 
-func (suite *RoosterUtilsTest) SetupSuite() {
+func (suite *StreamlinerUtilsTest) SetupSuite() {
 	fmt.Println(" SetupSuite")
 	customDeleteOptions.DryRun = append(customDeleteOptions.DryRun, "All")
 	customListOptions.Limit = 1
 	fmt.Printf("customDeleteOptions: %v\n", customDeleteOptions)
 }
 
-func (suite *RoosterUtilsTest) TestGroupVersionGuess() {
+func (suite *StreamlinerUtilsTest) TestGroupVersionGuess() {
 	apiVersion := "v1"
 	kind := "pod"
 	expectedResult := plural{}
@@ -60,7 +60,7 @@ func (suite *RoosterUtilsTest) TestGroupVersionGuess() {
 	assert.Equal(suite.T(), expectedResult.Resource, val.Resource)
 }
 
-func (suite *RoosterUtilsTest) TestShellScript() {
+func (suite *StreamlinerUtilsTest) TestShellScript() {
 	cmd := "pwd"
 	result, err := utils.Shell(cmd)
 	assert.Nil(suite.T(), err)
@@ -68,7 +68,7 @@ func (suite *RoosterUtilsTest) TestShellScript() {
 	assert.Contains(suite.T(), result, "pkg/tests")
 }
 
-func (suite *RoosterUtilsTest) TestAssessmentOptions() {
+func (suite *StreamlinerUtilsTest) TestAssessmentOptions() {
 	testPackage := "my-test-package"
 	testBinary := "my-test-binary"
 	skip, err := utils.ValidateTestOptions(testPackage, testBinary)
@@ -76,7 +76,7 @@ func (suite *RoosterUtilsTest) TestAssessmentOptions() {
 	assert.False(suite.T(), skip)
 }
 
-func (suite *RoosterUtilsTest) TestAssessmentOptionsAbsence() {
+func (suite *StreamlinerUtilsTest) TestAssessmentOptionsAbsence() {
 	testPackage := ""
 	testBinary := ""
 	skip, err := utils.ValidateTestOptions(testPackage, testBinary)
@@ -84,7 +84,7 @@ func (suite *RoosterUtilsTest) TestAssessmentOptionsAbsence() {
 	assert.True(suite.T(), skip)
 }
 
-func (suite *RoosterUtilsTest) TestAssessmentPackageFailure() {
+func (suite *StreamlinerUtilsTest) TestAssessmentPackageFailure() {
 	testPackage := ""
 	testBinary := "my-test-binary"
 	skip, err := utils.ValidateTestOptions(testPackage, testBinary)
@@ -93,7 +93,7 @@ func (suite *RoosterUtilsTest) TestAssessmentPackageFailure() {
 	assert.False(suite.T(), skip)
 }
 
-func (suite *RoosterUtilsTest) TestAssessmentBinaryFailure() {
+func (suite *StreamlinerUtilsTest) TestAssessmentBinaryFailure() {
 	testPackage := "my-test-package"
 	testBinary := ""
 	skip, err := utils.ValidateTestOptions(testPackage, testBinary)
@@ -102,11 +102,11 @@ func (suite *RoosterUtilsTest) TestAssessmentBinaryFailure() {
 	assert.False(suite.T(), skip)
 }
 
-func (suite *RoosterUtilsTest) TestMatchBatchFailure() {
+func (suite *StreamlinerUtilsTest) TestMatchBatchFailure() {
 	rolloutNodes := []core_v1.Node{}
 	testNodes := []core_v1.Node{}
 	node := core_v1.Node{}
-	for i := 0; i >= 2; i++ {
+	for i := 0; i <= 2; i++ {
 		node.Name = "my-test-node-" + strconv.Itoa(i)
 		testNodes = append(testNodes, node)
 	}
@@ -115,11 +115,11 @@ func (suite *RoosterUtilsTest) TestMatchBatchFailure() {
 	assert.NotNil(suite.T(), err)
 }
 
-func (suite *RoosterUtilsTest) TestMatchBatchSuccess() {
+func (suite *StreamlinerUtilsTest) TestMatchBatchSuccess() {
 	rolloutNodes := []core_v1.Node{}
 	testNodes := []core_v1.Node{}
 	node := core_v1.Node{}
-	for i := 0; i >= 2; i++ {
+	for i := 0; i <= 2; i++ {
 		node.Name = "my-test-node-" + strconv.Itoa(i)
 		testNodes = append(testNodes, node)
 	}
@@ -130,6 +130,6 @@ func (suite *RoosterUtilsTest) TestMatchBatchSuccess() {
 }
 
 func TestUtils(t *testing.T) {
-	s := new(RoosterUtilsTest)
+	s := new(StreamlinerUtilsTest)
 	suite.Run(t, s)
 }

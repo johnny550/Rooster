@@ -17,31 +17,24 @@ limitations under the License.
 package worker
 
 import (
-	"strings"
-
 	"rooster/pkg/utils"
 
 	k8s_errors "k8s.io/apimachinery/pkg/api/errors"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func getAttribute(d string, i int) (attribute string) {
-	data := strings.Split(d, ",")
-	attribute = data[i]
-	return
-}
-
-func (m *Manager) queryResources(verb utils.Verb, targetResources []Resource, dryRun bool) (resources []unstructured.Unstructured, err error) {
+func (m *Manager) queryResources(verb utils.Verb, targetResources []Resource, dynamicOptions utils.DynamicQueryOptions) (resources []unstructured.Unstructured, err error) {
 	logger := m.kcm.Logger
 	resources = []unstructured.Unstructured{}
 	for _, currRes := range targetResources {
 		kind := currRes.Kind
 		name := currRes.Name
 		namespace := currRes.Namespace
+		apiVersion := currRes.ApiVersion
 		switch verb {
 		case utils.Get:
-			resource, err := m.getResource(kind, name, namespace)
+			getOpts := dynamicOptions.GetOptions
+			resource, err := m.kcm.GetResourcesDynamically(apiVersion, kind, namespace, name, getOpts)
 			if resource != nil {
 				resources = append(resources, *resource)
 			}
@@ -49,10 +42,26 @@ func (m *Manager) queryResources(verb utils.Verb, targetResources []Resource, dr
 				return resources, err
 			}
 		case utils.Delete:
-			_, err := m.deleteResource(kind, name, namespace, dryRun)
+			deleteOpts := dynamicOptions.DeleteOptions
+			_, err := m.kcm.DeleteResourcesDynamically(apiVersion, kind, namespace, name, deleteOpts)
 			if err != nil && !k8s_errors.IsNotFound(err) {
 				return resources, err
 			}
+		case utils.Patch:
+			patchOpts := dynamicOptions.PatchOptions
+			patchType := dynamicOptions.PatchType
+			patchData := dynamicOptions.PatchData
+			_, err := m.kcm.PatchResourcesDynamically(apiVersion, kind, namespace, name, patchType, patchData, patchOpts)
+			if err != nil {
+				return resources, err
+			}
+		case utils.List:
+			listOpts := dynamicOptions.ListOptions
+			r, err := m.kcm.ListResourcesDynamically(apiVersion, kind, namespace, listOpts)
+			if err != nil {
+				return resources, err
+			}
+			resources = r.Items
 		case utils.Update:
 			logger.Warn("Update not defined yet...")
 		case utils.Create:
@@ -61,39 +70,21 @@ func (m *Manager) queryResources(verb utils.Verb, targetResources []Resource, dr
 			logger.Error("Verb is unknown")
 			return
 		}
-
 	}
 	return
 }
 
-func (m *Manager) getResource(kind string, name string, namespace string) (resource *unstructured.Unstructured, err error) {
-	switch kind {
-	case "Service":
-		resource, err = utils.GetService(m.kcm, namespace, name)
-	case "DaemonSet":
-		resource, err = utils.GetDaemonSet(m.kcm, namespace, name)
-	case "ConfigMap":
-		resource, err = utils.GetConfigMap(m.kcm, namespace, name)
-	case "ServiceAccount":
-		resource, err = utils.GetServiceAccount(m.kcm, namespace, name)
+func (m *Manager) retrieveConfigMapContent(cmRes Resource) (cmdata utils.CmData, queryErr error) {
+	// get the cm
+	dynamicOpts := utils.DynamicQueryOptions{}
+	objs, queryErr := m.queryResources(utils.Get, []Resource{cmRes}, dynamicOpts)
+	if queryErr != nil {
+		return
 	}
-	return
-}
-
-func (m *Manager) deleteResource(kind string, name string, namespace string, dryRun bool) (opComplete bool, err error) {
-	customDeleteOptions := meta_v1.DeleteOptions{}
-	if dryRun {
-		customDeleteOptions.DryRun = append(customDeleteOptions.DryRun, "All")
-	}
-	switch kind {
-	case "Service":
-		opComplete, err = utils.DeleteService(m.kcm, namespace, name, customDeleteOptions)
-	case "DaemonSet":
-		opComplete, err = utils.DeleteDaemonSet(m.kcm, namespace, name, customDeleteOptions)
-	case "ConfigMap":
-		opComplete, err = utils.DeleteConfigMap(m.kcm, namespace, name, customDeleteOptions)
-	case "ServiceAccount":
-		opComplete, err = utils.DeleteServiceAccount(m.kcm, namespace, name, customDeleteOptions)
+	// extract the cm's data
+	cmdata, queryErr = utils.ExtractConfigMapData(objs[0])
+	if queryErr != nil {
+		return
 	}
 	return
 }

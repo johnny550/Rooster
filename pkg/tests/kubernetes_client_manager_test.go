@@ -50,7 +50,7 @@ func (suite *KubernetesClientTest) TestKubernetesDynamicClientGet() {
 	svcName := "kube-dns"
 	m, err := utils.New("")
 	assert.Nil(suite.T(), err)
-	svc, err := m.Execute(utils.Get, "v1", "Service", "kube-system", svcName)
+	svc, err := m.Execute(utils.Get, "v1", "Service", "kube-system", svcName, utils.DynamicQueryOptions{})
 	assert.Nil(suite.T(), err)
 	assert.Equal(suite.T(), svc.GetName(), svcName)
 }
@@ -96,7 +96,7 @@ func (suite *KubernetesClientTest) TestKubernetesDynamicClientDelete() {
 	customDeleteOptions.DryRun = append(customDeleteOptions.DryRun, "All")
 	fmt.Printf("target ns: %v\n", ns)
 	fmt.Printf("target Pod: %v\n", targetPod)
-	_, err = m.Execute(utils.Delete, "v1", "Pod", ns, targetPod)
+	_, err = m.Execute(utils.Delete, "v1", "Pod", ns, targetPod, utils.DynamicQueryOptions{})
 	assert.Nil(suite.T(), err)
 }
 

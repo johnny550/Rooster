@@ -20,7 +20,7 @@ import (
 	"errors"
 	"io"
 	"os"
-	"time"
+	"strings"
 
 	"rooster/pkg/config"
 	"rooster/pkg/utils"
@@ -29,16 +29,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type Resource struct {
-	Name      string
-	Namespace string
-	Manifest  string
-	Kind      string
-	Ready     bool
-}
-
 func ReadManifestFiles(logger *zap.Logger, manifestPath string, indicatedNamespace string) (objectReference []Resource, err error) {
 	logger.Info("Reading from " + manifestPath)
+	if !strings.HasSuffix(manifestPath, "/") {
+		manifestPath = manifestPath + "/"
+	}
 	// navigate to the indicated folder
 	files, err := os.ReadDir(manifestPath)
 	if err != nil {
@@ -48,7 +43,6 @@ func ReadManifestFiles(logger *zap.Logger, manifestPath string, indicatedNamespa
 		myResource := Resource{}
 		data := basicK8sConfiguration{}
 		myResource.Manifest = manifestPath + file.Name()
-		logger.Info("Reading file: " + myResource.Manifest)
 		fileInfo, err := os.Stat(manifestPath + file.Name())
 		if err != nil {
 			return nil, err
@@ -76,29 +70,41 @@ func ReadManifestFiles(logger *zap.Logger, manifestPath string, indicatedNamespa
 				return nil, err
 			}
 			namespaceInManifest := data.Metadata.Namespace
-			ns, err := DetermineNamespace(namespaceInManifest, indicatedNamespace)
+			ns, err := utils.DetermineNamespace(namespaceInManifest, indicatedNamespace)
 			if err != nil {
 				return nil, err
 			}
+			myResource.ApiVersion = data.ApiVersion
 			myResource.Kind = data.Kind
 			myResource.Name = data.Metadata.Name
 			myResource.Namespace = ns
+			myResource.UpdateStrategy = data.Spec.UpdateStrategy.StrategyType
 			objectReference = append(objectReference, myResource)
 		}
 	}
 	return objectReference, err
 }
 
-func backupResources(logger *zap.Logger, targetResources []Resource, cluster string) (backupDirFullName string, err error) {
+func backupResources(logger *zap.Logger, targetResources []Resource, cluster string, projectOptions ProjectOptions, ignoreResources bool) (backupDirFullName string, err error) {
 	backupDir := config.Env.BackupDirectory
+	projectName := projectOptions.Project
+	currentVersion := projectOptions.CurrVersion
+	if ignoreResources {
+		logger.Warn("Resources are ignored. Skipping backup operation.")
+		return
+	}
 	if backupDir == "" {
-		return "", errors.New("Backup directory not found")
+		return "", errors.New("backup directory not found")
 	}
 	if len(targetResources) == 0 {
-		return backupDirFullName, errors.New("No resources to back up")
+		return backupDirFullName, errors.New("no resources to back up")
 	}
-	ts := time.Now().Format("2006.01.02_15:04:05")
-	backupDirFullName = backupDir + "/" + cluster + "/" + ts
+	nameComponents := []string{backupDir, cluster, projectName, currentVersion}
+	backupDirFullName = strings.Join(nameComponents, "/")
+	// TODO: do I need this?
+	// if found := CheckDirectoryExistence(backupDirFullName); found {
+	// 	err = errors.New("version backup already found")
+	// }
 	if err = os.MkdirAll(backupDirFullName, os.ModePerm); err != nil {
 		return
 	}
