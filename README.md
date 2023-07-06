@@ -176,17 +176,17 @@ info:
 ```
 
 # Future improvements
-* Create a Makefile, chain it to a script to easily execute tests, build the environment, and other useful operations. CAP-4579
-* Ability to scale down a version that is not current. At this point, scaling down a version that isn't current is forbidden. Find a way around that. CAP-4444
-* Stop the rollout action from scaling up resources. Isolate such ability in a new action: scale-up CAP-4580
-* Improve how manifest files are checked. When a file is empty, Rooster ignores it, but when it doesn't contain YAML or misses critical fields, v3.Yaml hangs at yaml.NewDecoder(*io.Reader).Decode(&struct) CAP-4295
-* Extend the rollout methods to be automatically done by Rooster after a user-specified time (linear-10-Every-Minute, Canary10Percent10Minutes, etc...) CAP-4294
-* Accept other test binaries. Language-agnosticism is the goal. CAP-4293
-* Consider keeping backup files in a more reliable & available location: bitbucket, s3, etc... CAP-4292
-* Improve the support for multiple daemonsets. So far multiple daemonsets can be released at once, as long as they define the same labels in their affinity context. CAP-4291
-* Idempotency. Rooster will be run as a controller from inside the cluster, as operator/controller, in the future. (same idea of deployment-controller over replicaset. Rooster can work as a controller for daemonset) CAP-4296
-* Can I get rid of the kubectlEmulator? CAP-4443
-* Improve the code quality of the function in charge of checking the readiness of resources (areResourcesReady) CAP-4297
+* Create a Makefile, chain it to a script to easily execute tests, build the environment, and other useful operations. TICKET-4579
+* Ability to scale down a version that is not current. At this point, scaling down a version that isn't current is forbidden. Find a way around that. TICKET-4444
+* Stop the rollout action from scaling up resources. Isolate such ability in a new action: scale-up TICKET-4580
+* Improve how manifest files are checked. When a file is empty, Rooster ignores it, but when it doesn't contain YAML or misses critical fields, v3.Yaml hangs at yaml.NewDecoder(*io.Reader).Decode(&struct) TICKET-4295
+* Extend the rollout methods to be automatically done by Rooster after a user-specified time (linear-10-Every-Minute, Canary10Percent10Minutes, etc...) TICKET-4294
+* Accept other test binaries. Language-agnosticism is the goal. TICKET-4293
+* Consider keeping backup files in a more reliable & available location: bitbucket, s3, etc... TICKET-4292
+* Improve the support for multiple daemonsets. So far multiple daemonsets can be released at once, as long as they define the same labels in their affinity context. TICKET-4291
+* Idempotency. Rooster will be run as a controller from inside the cluster, as operator/controller, in the future. (same idea of deployment-controller over replicaset. Rooster can work as a controller for daemonset) TICKET-4296
+* Can I get rid of the kubectlEmulator? TICKET-4443
+* Improve the code quality of the function in charge of checking the readiness of resources (areResourcesReady) TICKET-4297
 * ~~Validate the canary-label by making sure it does not exist on any node in the cluster before going any further (Early failure policy).~~
 * ~~Improve the backup folder logic, and set backup files to be kept in different folders, based off the date, cluster name, etc...~~
 * ~~Make the canary fashion optional. Allow-Rooster to deploy resources in different ways (all-at-once, canary-10Minutes, linear-10-Every-Minute, etc...)~~
