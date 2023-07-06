@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"go.uber.org/zap"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
@@ -32,9 +33,10 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-type K8sClient struct {
-	client        *kubernetes.Clientset
-	dynamicClient *dynamic.Interface
+type K8sClientManager struct {
+	Client        *kubernetes.Clientset
+	DynamicClient *dynamic.Interface
+	Logger        *zap.Logger
 }
 
 func getConfig(kubeconfigPath string) (config *rest.Config, err error) {
@@ -47,7 +49,7 @@ func getConfig(kubeconfigPath string) (config *rest.Config, err error) {
 	return config, err
 }
 
-func New(kubeConfig string) (*K8sClient, error) {
+func New(kubeConfig string) (*K8sClientManager, error) {
 	client, err := newClient(kubeConfig)
 	if err != nil {
 		return nil, err
@@ -56,9 +58,14 @@ func New(kubeConfig string) (*K8sClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &K8sClient{
-		client:        client,
-		dynamicClient: &dynamicClient,
+	logger, err := zap.NewProduction()
+	if err != nil {
+		return nil, err
+	}
+	return &K8sClientManager{
+		Client:        client,
+		DynamicClient: &dynamicClient,
+		Logger:        logger,
 	}, nil
 }
 
@@ -86,28 +93,20 @@ func newDynamicClient(kubeConfig string) (client dynamic.Interface, err error) {
 	return client, err
 }
 
-func (m *K8sClient) GetClient() *kubernetes.Clientset {
-	return m.client
-}
-
-func (m *K8sClient) GetDynamicClient() *dynamic.Interface {
-	return m.dynamicClient
-}
-
-func (m *K8sClient) Execute(verb Verb, apiVersion string, kind string, namespace string, name string) (*unstructured.Unstructured, error) {
+func (m *K8sClientManager) Execute(verb Verb, apiVersion string, kind string, namespace string, name string) (*unstructured.Unstructured, error) {
 	// Define the context
 	ctx := context.TODO()
 	// Define the Group-Version-Resource object
 	gvr, err := UnsafeGuessGroupVersionResource(apiVersion, kind)
 	if err != nil {
-		logger.Error(err.Error())
+		return nil, err
 	}
 	// Run the command
 	switch verb {
 	case Get:
-		return (*m.dynamicClient).Resource(*gvr).Namespace(namespace).Get(ctx, name, meta_v1.GetOptions{})
+		return (*m.DynamicClient).Resource(*gvr).Namespace(namespace).Get(ctx, name, meta_v1.GetOptions{})
 	case Delete:
-		return nil, (*m.dynamicClient).Resource(*gvr).Namespace(namespace).Delete(ctx, name, meta_v1.DeleteOptions{})
+		return nil, (*m.DynamicClient).Resource(*gvr).Namespace(namespace).Delete(ctx, name, meta_v1.DeleteOptions{})
 	default:
 		return nil, fmt.Errorf("verb is invalid. (%+v)", verb)
 	}
