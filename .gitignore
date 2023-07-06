@@ -1,2 +1,4 @@
 pkg/test-binaries
 .vscode
+cover.html
+cover.out

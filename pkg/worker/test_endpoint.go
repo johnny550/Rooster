@@ -21,25 +21,22 @@ import (
 	"os"
 	"os/exec"
 
+	"rooster/pkg/utils"
+
 	"go.uber.org/zap"
 )
 
 func runTests(logger *zap.Logger, testPackage string, testBinary string) (err error) {
-	// If the test related options were not specified, skip tests
-	if testPackage == "" && testBinary == "" {
-		logger.Info("Skipping test phase. Only basic resource checks will be performed.")
-		return nil
-	}
-	if testPackage == "" {
-		err = errors.New("test package not defined")
+	skip, err := utils.ValidateTestOptions(testPackage, testBinary)
+	if err != nil {
 		return
 	}
-	if testBinary == "" {
-		err = errors.New("test binary not defined")
+	if skip {
+		logger.Info("Skipping test phase. Only basic resource checks will be performed.")
 		return
 	}
 	logger.Info("Running tests...")
-	testExecutable, err := exec.LookPath("y" + testBinary)
+	testExecutable, err := exec.LookPath("pkg/test-binaries/" + testBinary)
 	if err != nil {
 		return
 	}
