@@ -18,9 +18,11 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -30,87 +32,81 @@ import (
 	core_v1 "k8s.io/api/core/v1"
 	k8s_errors "k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func (m *Manager) patchNodes(opts RolloutOptions) (bool, error) {
+func (m *Manager) incrementalNodePatch(nodes []core_v1.Node, controlLabel string, dryRun, ignoreNotFound bool) (err error) {
 	logger := m.kcm.Logger
-	ctx := context.TODO()
-	strategy := opts.Strategy
+	opts := RoosterOptions{CanaryLabel: controlLabel, DryRun: dryRun}
+	// patch
+	logger.Info("Preparing to patch nodes. Op: Remove")
+	opts.RolloutNodes = nodes
+	// define the labels to remove/add
+	data := utils.SplitLabel([]string{controlLabel})
+	_, err = m.patchNodes(opts, "remove", data)
+	if err != nil && !ignoreNotFound {
+		return
+	}
+	// wait
+	time.Sleep(10 * time.Second)
+	// patch
+	logger.Info("Preparing to patch nodes. Op: Replace")
+	opts.RolloutNodes = nodes
+	_, err = m.patchNodes(opts, "replace", data)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func (m *Manager) patchNodes(opts RoosterOptions, operation string, data map[string]string) (bool, error) {
+	logger := m.kcm.Logger
 	rolloutNodes := opts.RolloutNodes
-	nodesWithTargetLabel := opts.NodesWithTargetlabel
-	controlLabel := opts.CanaryLabel
-	batchSize := opts.BatchSize
 	dryRun := opts.DryRun
-	// Split the canary label
-	cL := strings.Split(controlLabel, "=")
-	controlLabelKey := cL[0]
-	controlLabelVal := cL[1]
-	// get the nodes with the control/canary label
-	customOptions := meta_v1.ListOptions{}
-	customOptions.LabelSelector = controlLabel
-	nodes, err := m.getNodes(customOptions)
-	if err != nil {
-		return false, err
-	}
-	logger.Sugar().Infof("Batch size---: %g", batchSize)
-	nodesToRevert := []core_v1.Node{}
-	switch strings.ToLower(strategy) {
-	case "linear":
-		nodesToRevert = defineLinearNodeScope(logger, nodes, int(batchSize), nodesWithTargetLabel)
-	case "canary":
-		nodesToRevert = defineCanaryNodeScope(nodes, controlLabelKey)
-	default:
-		return false, errors.New("Unsupported rollout strategy")
-	}
-	// Case 1: More nodes than specified by the canary batch size have the canary label already. This may be a resource update situation
-	// E.g: batch size=3. nodes with the canary label in the cluster at this point: 4 or more
-	if len(nodesToRevert) > int(batchSize) {
-		// iterate in reverse to start with the last nodes
-		for i := len(nodesToRevert) - 1; i >= 0; i-- {
-			// Remove the canary label from the nodes part of the 2nd batch
-			if i == int(batchSize)-1 {
-				logger.Info("Reached the batch size limit")
-				break
-			}
-			logger.Info("Removing canary label from " + nodesToRevert[i].Name)
-			_, err := m.removeLabelFromNode(nodesToRevert[i], controlLabelKey, dryRun)
-			if err != nil {
-				return false, err
-			}
-		}
-		waitForResources(10 * time.Second)
-		return true, nil
-	}
-	// Case 2: Either no node has the canary label yet, or less nodes specified by the canary batch size do
-	// E.g: batch size=3. nodes with the canary label in the cluster at this point: 1, or 0
-	customPatchOptions := meta_v1.PatchOptions{}
-	if dryRun {
-		customPatchOptions.DryRun = append(customPatchOptions.DryRun, "All")
-	}
 	p := types.JSONPatchType
-	payload := []patchStringValue{{
-		Op:    "replace",
-		Path:  "/metadata/labels/" + controlLabelKey,
-		Value: controlLabelVal,
-	}}
-	data, err := json.Marshal(payload)
+	logger.Info("Patching nodes")
+	patchData, err := utils.MakePatchData(labelPrefix, operation, data)
 	if err != nil {
 		return false, err
 	}
-	for _, rolloutNode := range rolloutNodes {
-		// Label the nodes with the control/canary label
-		logger.Info("Node to patch: " + rolloutNode.Name)
-		_, err := m.kcm.Client.CoreV1().Nodes().Patch(ctx, rolloutNode.Name, p, data, customPatchOptions)
-		if err != nil {
-			return false, err
-		}
+	patchOpts := utils.MakePatchOptions(dryRun)
+	dynamicOpts := utils.DynamicQueryOptions{PatchOptions: patchOpts, PatchData: patchData, PatchType: p}
+	nodeResources := convertToStreamlinerResource(rolloutNodes)
+	// Label the nodes with the control/canary label
+	_, err = m.queryResources(utils.Patch, nodeResources, dynamicOpts)
+	if err != nil {
+		return false, err
 	}
-	logger.Info("Patching complete")
+	logger.Info("Patch operation complete")
 	return true, nil
 }
 
-func (m *Manager) determineRolloutAction(opts RolloutOptions, missingResources []Resource) (rolloutAction string) {
+// Will create a config map in a given namespace or just return it if it already exists
+func (m *Manager) createConfigMap(namespace string, cm core_v1.ConfigMap, dryRun bool) (myConfigmap *core_v1.ConfigMap, err error) {
+	logger := m.kcm.Logger
+	ctx := context.TODO()
+	opts := utils.MakeCreateOptions(dryRun)
+	logger.Info("Creating config map")
+	return m.kcm.Client.CoreV1().ConfigMaps(namespace).Create(ctx, &cm, opts)
+}
+
+func (m *Manager) patchConfigmap(action string, projectOpts ProjectOptions, cmdata map[string]string, dryRun bool) (output []unstructured.Unstructured, err error) {
+	p := types.JSONPatchType
+	op := "replace"
+	projectName := projectOpts.Project
+	cmResourcePrj := makeCMName(projectName)
+	data, err := utils.MakePatchData(cmDataPrefix, op, cmdata)
+	if err != nil {
+		return
+	}
+	patchOpts := utils.MakePatchOptions(dryRun)
+	dynamicOpts := utils.DynamicQueryOptions{PatchOptions: patchOpts, PatchData: data, PatchType: p}
+	output, err = m.queryResources(utils.Patch, []Resource{cmResourcePrj}, dynamicOpts)
+	return
+}
+
+func (m *Manager) determineRolloutAction(opts RoosterOptions, missingResources []Resource) (rolloutAction string) {
 	updateIfExists := opts.UpdateIfExists
 	if updateIfExists {
 		rolloutAction = "apply-all"
@@ -120,13 +116,18 @@ func (m *Manager) determineRolloutAction(opts RolloutOptions, missingResources [
 	return
 }
 
-func (m *Manager) applyRolloutAction(action string, manifestPath string, resources []Resource, namespace string, dryRun bool) (err error) {
+func (m *Manager) applyRolloutAction(action, manifestPath, namespace string, resources []Resource, ignoreResources, dryRun bool) (err error) {
 	logger := m.kcm.Logger
-	logger.Info("ACTION: " + action)
+	logger.Sugar().Infof("ACTION: %s", action)
+	if ignoreResources {
+		logger.Warn("Resources are ignored. Skipping resource creation.")
+		return
+	}
+	deleteOpts := utils.MakeDeleteOptions(dryRun)
+	dynamicOpts := utils.DynamicQueryOptions{DeleteOptions: deleteOpts}
 	if strings.EqualFold(action, "apply-all") {
 		// make sure the latest version will be deployed by removing the old ones first
-		// 3 for the verb DELETE
-		_, err = m.queryResources(3, resources, dryRun)
+		_, err = m.queryResources(utils.Delete, resources, dynamicOpts)
 		if err != nil {
 			return err
 		}
@@ -142,13 +143,14 @@ func (m *Manager) applyRolloutAction(action string, manifestPath string, resourc
 func (m *Manager) getMissingResources(targetResources []Resource) (missingResources []Resource, err error) {
 	missingResources = []Resource{}
 	for _, currRes := range targetResources {
-		_, err := m.getResource(currRes.Kind, currRes.Name, currRes.Namespace)
+		_, err := m.kcm.GetResourcesDynamically(currRes.ApiVersion, currRes.Kind, currRes.Namespace, currRes.Name, meta_v1.GetOptions{})
 		if k8s_errors.IsNotFound(err) {
 			rs := Resource{
-				Kind:      currRes.Kind,
-				Name:      currRes.Name,
-				Namespace: currRes.Namespace,
-				Manifest:  currRes.Manifest,
+				ApiVersion: currRes.ApiVersion,
+				Kind:       currRes.Kind,
+				Name:       currRes.Name,
+				Namespace:  currRes.Namespace,
+				Manifest:   currRes.Manifest,
 			}
 			missingResources = append(missingResources, rs)
 			continue
@@ -164,7 +166,12 @@ func waitForResources(duration time.Duration) {
 	time.Sleep(duration)
 }
 
-func (m *Manager) verifyResourcesStatus(targetResources []Resource) (err error) {
+func (m *Manager) verifyResourcesStatus(ignoreResources bool, targetResources []Resource) (err error) {
+	logger := m.kcm.Logger
+	if ignoreResources {
+		logger.Warn("Resources are ignored. Skipping resources status check.")
+		return
+	}
 	resourceReport, err := m.areResourcesReady(targetResources)
 	if err != nil {
 		return
@@ -172,47 +179,15 @@ func (m *Manager) verifyResourcesStatus(targetResources []Resource) (err error) 
 	if len(resourceReport) == 0 {
 		// TODO_1b the next line won't be needed anymore once areResourcesReady is improved.
 		// A more explicit error should be returned
-		err = errors.New("Resources readiness could not be defined")
+		err = errors.New("resources readiness could not be defined")
 		return
 	}
 	for _, rs := range resourceReport {
 		if !rs.Ready {
-			err = errors.New("Issues encountered with the " + rs.Kind + " " + rs.Name)
-			return err
+			return errors.New("issues encountered with the " + rs.Kind + " " + rs.Name)
 		}
 	}
 	return
-}
-
-func (m *Manager) removeLabelFromNode(targetNode core_v1.Node, labelKey string, dryRun bool) (done bool, err error) {
-	dryRunStrategy := "none"
-	if dryRun {
-		dryRunStrategy = "client"
-	}
-	// Get all the nodes matching the target label
-	cmd, err := utils.KubectlEmulator("", "label node "+targetNode.Name+" "+labelKey+"-"+" --dry-run="+dryRunStrategy)
-	if err != nil {
-		m.kcm.Logger.Info(cmd)
-		return false, err
-	}
-	return true, nil
-}
-
-func (m *Manager) rollbackToPreviousSettings(targetResources []Resource, pathToBackupDirectory string, targetNamespace string, dryRun bool) (bool, error) {
-	logger := m.kcm.Logger
-	logger.Info("----Rolling back to the previous settings------")
-	// delete the resources that are deployed in the cluster
-	_, err := m.queryResources(3, targetResources, false)
-	if err != nil {
-		return false, err
-	}
-	logger.Info("Resources deletion is now complete.")
-	// deploy the resources that had their config backed up before
-	err = deployResources(logger, pathToBackupDirectory, targetNamespace, dryRun)
-	if err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 func (m *Manager) areResourcesReady(targetResources []Resource) (resourcesStatus []Resource, err error) {
@@ -222,7 +197,8 @@ func (m *Manager) areResourcesReady(targetResources []Resource) (resourcesStatus
 	resourcesStatus = []Resource{}
 	rs := Resource{}
 	// 0 for the verb GET
-	resources, err := m.queryResources(0, targetResources, false)
+	dynamicOpts := utils.DynamicQueryOptions{GetOptions: meta_v1.GetOptions{}}
+	resources, err := m.queryResources(utils.Get, targetResources, dynamicOpts)
 	if err != nil {
 		return
 	}
@@ -252,35 +228,24 @@ func (m *Manager) areResourcesReady(targetResources []Resource) (resourcesStatus
 func (m *Manager) checkResourceStatus(kind string, status map[string]interface{}, rs Resource) (result bool, err error) {
 	switch kind {
 	case "DaemonSet":
-		ready, err := checkDaemonSetStatus(status)
+		ready, err := utils.CheckDaemonSetStatus(status)
 		if err != nil {
 			return ready, err
 		}
 	default:
-		_, err := m.getResource(rs.Kind, rs.Name, rs.Namespace)
-		if err != nil {
-			return false, err
-		}
+		// do nothing particular
 	}
 	return true, err
 }
 
-func (m *Manager) getNodes(customOptions meta_v1.ListOptions) (targetNodes core_v1.NodeList, err error) {
-	ctx := context.TODO()
-	// Get all the nodes with the indicated label.
-	nodeList, err := m.kcm.Client.CoreV1().Nodes().List(ctx, customOptions)
-	targetNodes = *nodeList
-	return
-}
-
+/**
+* Ensures the following:
+* Nodes with the target label must exist
+* If no node is found, bail
+* Nodes with the canary labels should not exist
+* If some are found, the choice to continue the rollout is given to the user
+**/
 func (m *Manager) verifyLabelValidity(label string, shouldExist string) (output bool, err error) {
-	/*
-	* Nodes with the target label must exist
-	* If no node is found, bail
-	* Nodes with the canary labels should not exist
-	* If some are found, the choice to continue the rollout is given to the user
-	*
-	 */
 	// Review nodes labels
 	customOptions := meta_v1.ListOptions{}
 	customOptions.LabelSelector = label
@@ -290,72 +255,95 @@ func (m *Manager) verifyLabelValidity(label string, shouldExist string) (output 
 	}
 	expectedStatus, _ := strconv.ParseBool(shouldExist)
 	// Nodes with the canary label were found, but it may be okay to carry on
-	if !expectedStatus && len(nodes.Items) > 0 {
-		decision := indicateNextAction()
+	if !expectedStatus && len(nodes) > 0 {
+		decision := utils.IndicateNextAction()
 		if !decision {
-			err = errors.New("User cancelled action")
+			err = errors.New("user cancelled action")
 		}
 		return decision, err
 	}
 	// No nodes carrying the target label were found. Abort!
-	if expectedStatus && len(nodes.Items) == 0 {
-		err = errors.New("No node carrying the target label was found.")
+	if expectedStatus && len(nodes) == 0 {
+		err = errors.New("no node carrying the target label was found")
 		return
 	}
 	output = true
 	return
 }
 
-func (m *Manager) performRollout(rolloutOpts RolloutOptions) (backupDirectory string, err error) {
+/**
+* GOAL: Rollout resources onto a given cluster
+* Will:
+* - Determine if some of the indicated resources are already in the cluster
+* - Create the missing resource (Will apply to all if none was found)
+* - Label the nodes with the canary/control label
+* - Make sure the resources are ready
+* - Run the indicated tests
+**/
+func (m *Manager) performRollout(rolloutOpts RoosterOptions) (backupDirectory string, err error) {
 	dryRun := rolloutOpts.DryRun
 	manifestPath := rolloutOpts.ManifestPath
 	namespace := rolloutOpts.Namespace
 	resourcesToDeploy := rolloutOpts.Resources
+	clusterID := rolloutOpts.ClusterID
+	projectOptions := rolloutOpts.ProjectOpts
+	testBinary := rolloutOpts.TestBinary
+	testSuite := rolloutOpts.TestSuite
+	rolloutNodes := rolloutOpts.RolloutNodes
+	controlLabel := rolloutOpts.CanaryLabel
 	logger := m.kcm.Logger
-	logger.Info("Patching nodes...")
-	_, err = m.patchNodes(rolloutOpts)
-	if err != nil {
-		return backupDirectory, err
-	}
-	logger.Info("Backing up resources...")
-	// Back up existing resources
-	backupDirectory, err = backupResources(logger, rolloutOpts.Resources, rolloutOpts.ClusterName)
-	if err != nil {
-		return backupDirectory, err
-	}
+	ignoreResources := rolloutOpts.IgnoreResources
 	// Check all the resources. See if they are in the cluster
-	missingResources, err := m.getMissingResources(rolloutOpts.Resources)
+	missingResources, err := m.getMissingResources(resourcesToDeploy)
 	if err != nil {
 		return backupDirectory, err
 	}
 	logger.Sugar().Infof("Missing resource: %t", len(missingResources) > 0)
 	rolloutAction := m.determineRolloutAction(rolloutOpts, missingResources)
+	// If none of the resources to deploy are available, no need to take a backup
+	// If resources should be ignored, no need to take a backup
+	if len(resourcesToDeploy) > len(missingResources) && !ignoreResources {
+		logger.Info("Backing up resources...")
+		// Back up existing resources
+		backupDirectory, err = backupResources(logger, resourcesToDeploy, clusterID, projectOptions, ignoreResources)
+		if err != nil {
+			return backupDirectory, err
+		}
+	}
 	switch rolloutAction {
 	case "apply-all":
-		err = m.applyRolloutAction(rolloutAction, manifestPath, resourcesToDeploy, namespace, dryRun)
+		err = m.applyRolloutAction(rolloutAction, manifestPath, namespace, resourcesToDeploy, ignoreResources, dryRun)
+		if err != nil {
+			return
+		}
 	case "apply-selective":
 		// Get manifest of missing resource
 		// Only create missing resources
 		for _, rs := range missingResources {
 			myRs := []Resource{rs}
 			logger.Info("Creating missing " + rs.Kind + " " + rs.Name + ", in namespace: " + rs.Namespace)
-			err = m.applyRolloutAction(rolloutAction, rs.Manifest, myRs, rs.Namespace, dryRun)
+			err = m.applyRolloutAction(rolloutAction, rs.Manifest, rs.Namespace, myRs, ignoreResources, dryRun)
+			if err != nil {
+				return backupDirectory, err
+			}
 		}
 	}
+	// patch nodes
+	err = m.incrementalNodePatch(rolloutNodes, controlLabel, dryRun, true)
 	if err != nil {
 		return backupDirectory, err
 	}
-	if rolloutOpts.DryRun {
+	if dryRun {
 		logger.Info("Dry run operation. No errors encountered")
 		return
 	}
 	// Check if all resources are ready
-	err = m.verifyResourcesStatus(rolloutOpts.Resources)
+	err = m.verifyResourcesStatus(ignoreResources, resourcesToDeploy)
 	if err != nil {
 		return backupDirectory, err
 	}
 	// Run the tests
-	err = runTests(logger, rolloutOpts.TestPackage, rolloutOpts.TestBinary)
+	err = runTests(logger, testSuite, testBinary)
 	if err != nil {
 		logger.Warn("Tests have failed.")
 		return backupDirectory, err
@@ -363,7 +351,93 @@ func (m *Manager) performRollout(rolloutOpts RolloutOptions) (backupDirectory st
 	return backupDirectory, err
 }
 
-func (m *Manager) defineBatchSize(nodeList core_v1.NodeList, canaryOrIncrement int) (nodes []core_v1.Node, batchSize float64) {
+/**
+* Will get the current version for the given project.
+* Two sources of truth are required to match
+* Source of truth 1: The data of type CmData, reflected by the configmap <str-versioning-cache-PROJECT>
+* Source of truth 2: The labels on the nodes in the current cluster
+* Will:
+* - Get the current version based off the given data
+* - Get the nodes carrying the label specifying the current version
+* - Ensure the nodes listed in the CM and the labeled ones match
+**/
+func (m *Manager) getCurrentVersion(project string, cmdata utils.CmData) (version string, err error) {
+	logger := m.kcm.Logger
+	// get the current version and the nodes it touches
+	vd := m.ExtractCurrentVersionDetails(project, cmdata)
+	if len(vd) > 1 {
+		err = errors.New("No more than one version can be current for project " + project)
+		return
+	}
+	nodes := []string{}
+	// vrs: current version
+	// n: node names
+	for vrs, n := range vd {
+		version = vrs
+		nodes = strings.Split(n, ",")
+	}
+	// get nodes marked with deploy.streamliner.<PROJECT>=<CURRENT_VERSION>
+	markedNodes, err := m.getMarkedNodes(project, version)
+	if err != nil {
+		return
+	}
+	// make sure the nodes in resources and the ones in the cm data are the same
+	sort.Slice(markedNodes, func(i, j int) bool {
+		return markedNodes[i] < markedNodes[j]
+	})
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i] < nodes[j]
+	})
+	if !reflect.DeepEqual(markedNodes, nodes) {
+		err = errors.New("versions from the cache and labels do not match. Cache drift detected")
+		logger.Sugar().Infof("markedNodes: %v\n", markedNodes)
+		logger.Sugar().Infof("cm saved nodes: %v\n", nodes)
+		return
+	}
+	return
+}
+
+/**
+* Will get the nodes carrying the label specifying the given project and version
+**/
+func (m *Manager) getMarkedNodes(project, version string) (markedNodes []string, err error) {
+	// compose the selector
+	_, versionSelector := utils.MakeVersionLabel(STREAMLINER_LBL_PREFIX, project, version)
+	listOpts := meta_v1.ListOptions{
+		LabelSelector: versionSelector,
+	}
+	nodes, err := m.getNodes(listOpts)
+	markedNodes = []string{}
+	for _, n := range nodes {
+		markedNodes = append(markedNodes, n.GetName())
+	}
+	return
+}
+
+/**
+* Will label the given resources with the project name and running version
+**/
+func (m *Manager) applyVersionPatch(resources []Resource, projectOptions ProjectOptions, dryRun bool) (err error) {
+	logger := m.kcm.Logger
+	p := types.JSONPatchType
+	prj := projectOptions.Project
+	vrs := projectOptions.DesiredVersion
+	patchOpts := utils.MakePatchOptions(dryRun)
+	labelKey, _ := utils.MakeVersionLabel(STREAMLINER_LBL_PREFIX, prj, vrs)
+	labels := make(map[string]string)
+	labels[labelKey] = vrs
+	op := "replace"
+	data, err := utils.MakePatchData(labelPrefix, op, labels)
+	if err != nil {
+		return err
+	}
+	dynamicOpts := utils.DynamicQueryOptions{PatchOptions: patchOpts, PatchData: data, PatchType: p}
+	_, err = m.queryResources(utils.Patch, resources, dynamicOpts)
+	logger.Info("Version patch effective")
+	return
+}
+
+func (m *Manager) calBatchSize(nodeList core_v1.NodeList, canaryOrIncrement int) (nodes []core_v1.Node, batchSize float64) {
 	logger := m.kcm.Logger
 	// Set the batch size
 	logger.Info("Defining batch size...")
@@ -384,4 +458,105 @@ func (m *Manager) defineBatchSize(nodeList core_v1.NodeList, canaryOrIncrement i
 		logger.Sugar().Infof("Targeted nodes count: %g/%d", batchSize, len(nodeList.Items))
 	}
 	return
+}
+
+func (m *Manager) getNodes(listOpts meta_v1.ListOptions) (targetNodes []unstructured.Unstructured, err error) {
+	dynamicOpts := utils.DynamicQueryOptions{
+		ListOptions: listOpts,
+	}
+	return m.queryResources(utils.List, []Resource{dummyNode}, dynamicOpts)
+}
+
+/**
+* Receives a project name and a struct of type CmData
+* Extracts the old versions for the given project.
+* Will return a map comprised of the following:
+* - key: a previous version
+* - value: the nodes onto which that version should be deployed based of the given CmData
+**/
+func (m *Manager) ExtractPreviousVersionDetails(project string, cmdata utils.CmData) (oldVersionDetails map[string]string) {
+	oldVersionDetails = make(map[string]string)
+	emptyNodes := []string{""}
+	d := cmdata.Data
+	for _, pii := range d.Info {
+		if curr, _ := strconv.ParseBool(pii.Current); !curr && !reflect.DeepEqual(emptyNodes, pii.Nodes) {
+			oldVersionDetails[pii.Version] = strings.Join(pii.Nodes, ",")
+		}
+	}
+	return
+}
+
+// Ensures previous versions are all inactive (deployed on no node)
+func (m *Manager) CheckPreviousVersions(cmdata utils.CmData, projectName, action string) error {
+	previousVersions := m.ExtractPreviousVersionDetails(projectName, cmdata)
+	for versionName, nodes := range previousVersions {
+		if len(nodes) > 0 {
+			return fmt.Errorf("previous version [%s] is registered as currently being rolled out. %s failed", versionName, action)
+		}
+	}
+	return nil
+}
+
+/**
+* Receives a project name and a struct of type CmData
+* Determines the current version of a given project based off the also given data.
+* Will return a map comprised of the following:
+* - key: the current version
+* - value: the nodes onto which that version should be deployed based of the given CmData
+**/
+func (m *Manager) ExtractCurrentVersionDetails(project string, cmdata utils.CmData) (versionDetails map[string]string) {
+	d := cmdata.Data
+	versionDetails = make(map[string]string)
+	for _, pii := range d.Info {
+		if curr, _ := strconv.ParseBool(pii.Current); curr {
+			versionDetails[pii.Version] = strings.Join(pii.Nodes, ",")
+		}
+	}
+	return
+}
+
+/**
+* Will remove the last-applied-config annotation from indicated resources
+**/
+func (m *Manager) RemoveLastAppliedAnnotation(resources []Resource, dryRun bool) (err error) {
+	if len(resources) == 0 {
+		m.kcm.Logger.Warn("Resources are ignored. Skipping config patch.")
+		return
+	}
+	dynamicOpts := utils.DynamicQueryOptions{}
+	op := "remove"
+	annotationPrefix := "/metadata/annotations/"
+	p := types.JSONPatchType
+	// ~1 for /
+	lastConfig := "kubectl.kubernetes.io~1last-applied-configuration="
+	annotation := utils.SplitLabel([]string{lastConfig})
+	patchData, err := utils.MakePatchData(annotationPrefix, op, annotation)
+	if err != nil {
+		return
+	}
+	patchOpts := utils.MakePatchOptions(dryRun)
+	dynamicOpts.PatchData = patchData
+	dynamicOpts.PatchOptions = patchOpts
+	dynamicOpts.PatchType = p
+	// get the obj, delete the last-applied-config (use patch for that)
+	_, err = m.queryResources(utils.Patch, resources, dynamicOpts)
+	return
+}
+
+func (m *Manager) DefineTargetNodes(opts RoosterOptions) (targets core_v1.NodeList, err error) {
+	targetNodes := opts.NodesWithTargetlabel
+	canaryLabel := opts.CanaryLabel
+	projectOptions := opts.ProjectOpts
+	// Not using getMarkedNodes because the selector is different
+	// To get nodes marked with the desired version label
+	_, versionSelector := utils.MakeVersionLabel(STREAMLINER_LBL_PREFIX, projectOptions.Project, projectOptions.DesiredVersion)
+	customOptions := meta_v1.ListOptions{}
+	// To get nodes that have a version and canary/control labels
+	customOptions.LabelSelector = strings.Join([]string{canaryLabel, versionSelector}, ",")
+	nodesWithControlLabel, err := m.getNodes(customOptions)
+	if err != nil {
+		return
+	}
+	canaryNodes := utils.MakeNodeList(nodesWithControlLabel)
+	return utils.ExtractUncommonNodes(targetNodes, canaryNodes), nil
 }

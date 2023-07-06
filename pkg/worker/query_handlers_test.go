@@ -32,20 +32,21 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-type CrudRoosterTest struct {
+type CrudStreamlinerTest struct {
 	suite.Suite
 }
 
 const (
-	ns        = "../tests/testdata/test_ns/test_ns.yaml"
+	nsConfig  = "../tests/testdata/test_ns/test_ns.yaml"
 	daemonset = "../tests/testdata/others/ds.yaml"
 	service   = "../tests/testdata/others/svc.yaml"
+	nspName   = "test-rooster"
 	namespace = "test-rooster"
 	dryRun    = true
 )
 
-func (suite *CrudRoosterTest) SetupSuite() {
-	cmd := fmt.Sprintf("kubectl apply -f %v", ns)
+func (suite *CrudStreamlinerTest) SetupSuite() {
+	cmd := fmt.Sprintf("kubectl apply -f %v", nsConfig)
 	output, err := shell(context.Background(), cmd)
 	assert.NotNil(suite.T(), output)
 	assert.Nil(suite.T(), err)
@@ -61,91 +62,109 @@ func (suite *CrudRoosterTest) SetupSuite() {
 	}
 }
 
-func (suite *CrudRoosterTest) TestService() {
+func (suite *CrudStreamlinerTest) TestService() {
 	name := "my-service"
-	svc := &unstructured.Unstructured{}
-	done := false
+	// svc := &unstructured.Unstructured{}
+	svc := []unstructured.Unstructured{}
+	// done := false
 	manager, err := utils.New("")
 	assert.Nil(suite.T(), err)
 	assert.NotNil(suite.T(), manager)
 	m := Manager{
 		kcm: *manager,
+	}
+	svcResource := Resource{
+		ApiVersion: apiVersionCoreV1,
+		Kind:       "Service",
+		Name:       name,
+		Namespace:  namespace,
 	}
 	tests := []string{"GetService", "DeleteService"}
 	for _, t := range tests {
 		suite.Run(t, func() {
 			switch t {
 			case "GetService":
-				svc, err = m.getResource("Service", name, namespace)
+				svc, err = m.queryResources(utils.Get, []Resource{svcResource}, utils.DynamicQueryOptions{})
 				assert.NotNil(suite.T(), svc)
-				assert.Equal(suite.T(), svc.GetName(), name)
+				assert.Equal(suite.T(), svc[0].GetName(), name)
 			case "DeleteService":
-				done, err = m.deleteResource("Service", name, namespace, dryRun)
-				assert.True(suite.T(), done)
+				_, err = m.queryResources(utils.Delete, []Resource{svcResource}, utils.DynamicQueryOptions{})
 			}
 			assert.Nil(suite.T(), err)
 		})
 	}
 }
 
-func (suite *CrudRoosterTest) TestServiceAccount() {
+func (suite *CrudStreamlinerTest) TestServiceAccount() {
 	name := "default"
-	sa := &unstructured.Unstructured{}
-	done := false
+	// sa := &unstructured.Unstructured{}
+	sa := []unstructured.Unstructured{}
+	// done := false
 	manager, err := utils.New("")
 	assert.Nil(suite.T(), err)
 	assert.NotNil(suite.T(), manager)
 	m := Manager{
 		kcm: *manager,
+	}
+	saResource := Resource{
+		ApiVersion: apiVersionCoreV1,
+		Kind:       "ServiceAccount",
+		Name:       name,
+		Namespace:  namespace,
 	}
 	tests := []string{"GetServiceAccount", "DeleteServiceAccount"}
 	for _, t := range tests {
 		suite.Run(t, func() {
 			switch t {
 			case "GetServiceAccount":
-				sa, err = m.getResource("ServiceAccount", name, namespace)
+				sa, err = m.queryResources(utils.Get, []Resource{saResource}, utils.DynamicQueryOptions{})
 				assert.NotNil(suite.T(), sa)
-				assert.Equal(suite.T(), sa.GetName(), name)
+				assert.Equal(suite.T(), sa[0].GetName(), name)
 			case "DeleteServiceAccount":
-				done, err = m.deleteResource("ServiceAccount", name, namespace, dryRun)
-				assert.True(suite.T(), done)
+				_, err = m.queryResources(utils.Delete, []Resource{saResource}, utils.DynamicQueryOptions{})
 			}
 			assert.Nil(suite.T(), err)
 		})
 	}
 }
 
-func (suite *CrudRoosterTest) TestConfigMap() {
+func (suite *CrudStreamlinerTest) TestConfigMap() {
 	name := "kube-root-ca.crt"
-	cm := &unstructured.Unstructured{}
-	done := false
+	cm := []unstructured.Unstructured{}
+	// done := false
 	manager, err := utils.New("")
 	assert.Nil(suite.T(), err)
 	assert.NotNil(suite.T(), manager)
 	m := Manager{
 		kcm: *manager,
 	}
+	cmResource := Resource{
+		ApiVersion: apiVersionCoreV1,
+		Kind:       cmKind,
+		Name:       name,
+		Namespace:  namespace,
+	}
 	tests := []string{"GetConfigMap", "DeleteConfigMap"}
 	for _, t := range tests {
 		suite.Run(t, func() {
 			switch t {
-			case "GetServiceAccount":
-				cm, err = m.getResource("ConfigMap", name, namespace)
+			case "GetConfigMap":
+				cm, err = m.queryResources(utils.Get, []Resource{cmResource}, utils.DynamicQueryOptions{})
 				assert.NotNil(suite.T(), cm)
-				assert.Equal(suite.T(), cm.GetName(), name)
-			case "DeleteServiceAccount":
-				done, err = m.deleteResource("ConfigMap", name, namespace, dryRun)
-				assert.True(suite.T(), done)
+				assert.Equal(suite.T(), cm[0].GetName(), name)
+			case "DeleteConfigMap":
+				_, err = m.queryResources(utils.Delete, []Resource{cmResource}, utils.DynamicQueryOptions{})
 			}
 			assert.Nil(suite.T(), err)
 		})
 	}
 }
 
-func (suite *CrudRoosterTest) TestDaemonSet() {
+func (suite *CrudStreamlinerTest) TestDaemonSet() {
 	name := "fluentd-elasticsearch"
-	ds := &unstructured.Unstructured{}
-	done := false
+	// ds := &unstructured.Unstructured{}
+	ds := []unstructured.Unstructured{}
+	// done := false
 	manager, err := utils.New("")
 	assert.Nil(suite.T(), err)
 	assert.NotNil(suite.T(), manager)
@@ -153,16 +172,21 @@ func (suite *CrudRoosterTest) TestDaemonSet() {
 		kcm: *manager,
 	}
 	tests := []string{"GetDaemonSet", "DeleteDaemonSet"}
+	dsResource := Resource{
+		ApiVersion: "apps/v1",
+		Kind:       "DaemonSet",
+		Name:       name,
+		Namespace:  namespace,
+	}
 	for _, t := range tests {
 		suite.Run(t, func() {
 			switch t {
 			case "GetDaemonSet":
-				ds, err = m.getResource("DaemonSet", name, namespace)
+				ds, err = m.queryResources(utils.Get, []Resource{dsResource}, utils.DynamicQueryOptions{})
 				assert.NotNil(suite.T(), ds)
-				assert.Equal(suite.T(), ds.GetName(), name)
+				assert.Equal(suite.T(), ds[0].GetName(), name)
 			case "DeleteDaemonSet":
-				done, err = m.deleteResource("DaemonSet", name, namespace, dryRun)
-				assert.True(suite.T(), done)
+				_, err = m.queryResources(utils.Delete, []Resource{dsResource}, utils.DynamicQueryOptions{})
 			}
 			assert.Nil(suite.T(), err)
 		})
@@ -170,7 +194,7 @@ func (suite *CrudRoosterTest) TestDaemonSet() {
 }
 
 func TestCrud(t *testing.T) {
-	s := new(CrudRoosterTest)
+	s := new(CrudStreamlinerTest)
 	suite.Run(t, s)
 }
 

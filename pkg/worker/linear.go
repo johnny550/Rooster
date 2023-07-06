@@ -17,43 +17,42 @@ limitations under the License.
 package worker
 
 import (
-	"errors"
-
 	"rooster/pkg/utils"
-
-	core_v1 "k8s.io/api/core/v1"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func (m *Manager) performLinearRollout(opts RolloutOptions) (backupDirectory string, err error) {
+/**
+* Goal: Perform a linear rollout
+* Ref: https://confluence.rakuten-it.com/confluence/display/CCOG/v1.1.0+-+Streamliner#v1.1.0Streamliner-Linearrollout
+* Will:
+* - Determine the nodes to target first
+* - Perform a rollout
+* - Label the target nodes with the version of the resources they host
+**/
+func (m *Manager) performLinearRollout(opts RoosterOptions) (backupDirectory string, err error) {
 	// Get params
 	logger := m.kcm.Logger
-	targetNodes := opts.NodesWithTargetlabel
 	incr := opts.Increment
-	// Define batch size
-	customOptions := meta_v1.ListOptions{}
-	customOptions.LabelSelector = opts.CanaryLabel
-	nodesWithControlLabel, err := m.getNodes(customOptions)
+	projectOptions := opts.ProjectOpts
+	dryRun := opts.DryRun
+	// new targets may include nodes that have don't have the target resources (pods) running on them
+	newTargets, err := m.DefineTargetNodes(opts)
 	if err != nil {
 		return
 	}
-	// defineNewTargetNodes
-	// get nodes that aren't common to the 2 slices
-	newTargets := extractUncommonNodes(targetNodes, nodesWithControlLabel)
 	if len(newTargets.Items) == 0 {
-		logger.Info("All nodes already carry the control label")
-		newTargets.Items = append(newTargets.Items, targetNodes.Items...)
+		err = utils.MakeRollloutLimitErr()
+		return
 	}
 	// based off those nodes, determine the batch size
 	logger.Sugar().Infof("Potential target nodes: %d", len(newTargets.Items))
-	logger.Sugar().Infof("increment: %d", incr)
-	rolloutNodes, batchSize := m.defineBatchSize(newTargets, incr)
-	if batchSize == 0 {
-		err = errors.New("You may want to review the canary/increment.")
+	// Define batch size
+	rolloutNodes, batchSize := m.calBatchSize(newTargets, incr)
+	if err = utils.ValidateBatchSize(int(batchSize)); err != nil {
 		return
 	}
 	// Verify the batch nodes
-	err = utils.MatchBatch(targetNodes.Items, rolloutNodes)
+	// err = utils.MatchBatch(targetNodes.Items, rolloutNodes)
+	err = utils.MatchBatch(newTargets.Items, rolloutNodes)
 	if err != nil {
 		return
 	}
@@ -64,19 +63,9 @@ func (m *Manager) performLinearRollout(opts RolloutOptions) (backupDirectory str
 	if err != nil {
 		return backupDirectory, err
 	}
+	// Apply the version-related patch, on the rollout nodes
+	nodeResources := convertToStreamlinerResource(rolloutNodes)
+	err = m.applyVersionPatch(nodeResources, projectOptions, dryRun)
 	logger.Info("The linear realease is now complete.")
-	return
-}
-
-func extractUncommonNodes(targetNodes, canaryNodes core_v1.NodeList) (nodesWithoutCanaryLabel core_v1.NodeList) {
-	markedNodes := make(map[string]core_v1.Node)
-	for _, n := range canaryNodes.Items {
-		markedNodes[n.Name] = n
-	}
-	for _, n := range targetNodes.Items {
-		if node := markedNodes[n.Name]; node.Name == "" {
-			nodesWithoutCanaryLabel.Items = append(nodesWithoutCanaryLabel.Items, n)
-		}
-	}
 	return
 }

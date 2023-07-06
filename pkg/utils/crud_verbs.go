@@ -23,4 +23,6 @@ const (
 	Create
 	Update
 	Delete
+	Patch
+	List
 )

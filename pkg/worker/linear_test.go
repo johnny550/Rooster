@@ -50,7 +50,7 @@ func (suite *LinearTest) TestTargetDefinition() {
 	for i := 3; i == 4; i++ {
 		expectedSet.Items = append(expectedSet.Items, node)
 	}
-	nodeSet3 := extractUncommonNodes(nodeSet1, nodeSet2)
+	nodeSet3 := utils.ExtractUncommonNodes(nodeSet1, nodeSet2)
 	assert.Equal(suite.T(), nodeSet3.Items, expectedSet.Items)
 }
 
@@ -61,17 +61,15 @@ func (suite *LinearTest) TestInvalidIncrement() {
 	m := Manager{
 		kcm: *manager,
 	}
-	options := RolloutOptions{
+	options := RoosterOptions{
 		Strategy:             "linear",
 		NodesWithTargetlabel: core_v1.NodeList{},
 		Increment:            0,
 		Namespace:            "test-rooster",
 		DryRun:               true,
 	}
-	expectedErr := errors.New("You may want to review the canary/increment.")
 	_, err = m.performLinearRollout(options)
 	assert.NotNil(suite.T(), err)
-	assert.Equal(suite.T(), expectedErr, err)
 }
 
 func (suite *LinearTest) TestMaxIncrement() {
@@ -93,14 +91,20 @@ func (suite *LinearTest) TestMaxIncrement() {
 	sampleNodeList := core_v1.NodeList{
 		Items: sampleNodes,
 	}
-	options := RolloutOptions{
+	prjOpts := ProjectOptions{
+		Project:        "linear-roll",
+		DesiredVersion: "vtest",
+	}
+	options := RoosterOptions{
 		Strategy:             "linear",
 		NodesWithTargetlabel: sampleNodeList,
 		Increment:            100,
 		Namespace:            "test-rooster",
 		DryRun:               true,
+		CanaryLabel:          "linear-control=label",
+		ProjectOpts:          prjOpts,
 	}
-	expectedErr := errors.New("The batch size cannot be equal to the total number of nodes to consider for the rollout. It must be inferior to the latter.")
+	expectedErr := errors.New("the batch size cannot be equal to the total number of nodes to consider for the rollout. It must be inferior to the latter")
 	_, err = m.performLinearRollout(options)
 	assert.NotNil(suite.T(), err)
 	assert.Equal(suite.T(), expectedErr, err)

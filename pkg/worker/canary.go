@@ -17,7 +17,6 @@ limitations under the License.
 package worker
 
 import (
-	"errors"
 	"strings"
 
 	"rooster/pkg/utils"
@@ -25,19 +24,39 @@ import (
 	core_v1 "k8s.io/api/core/v1"
 )
 
-func (m *Manager) performCanaryRollout(opts RolloutOptions) (backupDirectory string, err error) {
+/**
+* Goal: Perform a canary rollout
+* Ref: https://confluence.rakuten-it.com/confluence/display/CCOG/v1.1.0+-+Streamliner#v1.1.0Streamliner-Canaryrollout
+* Will:
+* - Determine the nodes to target first (canary)
+* - Perform a rollout
+* - Determine the rest of the nodes to target (all others relevant to the combination of target + canary label)
+* - Perform a rollout on the remaining nodes
+* - Label all the target nodes with the version of the resources they host
+**/
+func (m *Manager) performCanaryRollout(opts RoosterOptions) (backupDirectory string, err error) {
 	// Get params
 	logger := m.kcm.Logger
-	targetNodes := opts.NodesWithTargetlabel
 	canary := opts.Canary
+	dryRun := opts.DryRun
+	canaryLabel := opts.CanaryLabel
+	projectOptions := opts.ProjectOpts
+	// new targets may include nodes that have don't have the target resources (pods) running on them
+	newTargets, err := m.DefineTargetNodes(opts)
+	if err != nil {
+		return
+	}
+	if len(newTargets.Items) == 0 {
+		err = utils.MakeRollloutLimitErr()
+		return
+	}
 	// Define batch size
-	rolloutNodes, batchSize := m.defineBatchSize(targetNodes, canary)
-	if batchSize == 0 {
-		err = errors.New("You may want to review the canary/increment.")
+	rolloutNodes, batchSize := m.calBatchSize(newTargets, canary)
+	if err = utils.ValidateBatchSize(int(batchSize)); err != nil {
 		return
 	}
 	// Verify the batch nodes
-	err = utils.MatchBatch(targetNodes.Items, rolloutNodes)
+	err = utils.MatchBatch(newTargets.Items, rolloutNodes)
 	if err != nil {
 		return
 	}
@@ -53,21 +72,30 @@ func (m *Manager) performCanaryRollout(opts RolloutOptions) (backupDirectory str
 		return backupDirectory, err
 	}
 	// Update the list of rollout nodes
-	otherNodes := defineRestOfNodes(targetNodes, len(rolloutNodes))
+	otherNodes := defineRestOfNodes(newTargets, len(rolloutNodes))
 	opts.RolloutNodes = otherNodes
 	// Update the batch size
-	updatedBatchSize := len(targetNodes.Items) - int(batchSize)
+	updatedBatchSize := len(newTargets.Items) - int(batchSize)
 	opts.BatchSize = float64(updatedBatchSize)
 	// Complete the rollout
 	logger.Info("Patching remaining nodes...")
-	_, err = m.patchNodes(opts)
+	err = m.incrementalNodePatch(otherNodes, canaryLabel, dryRun, true)
 	if err != nil {
 		return backupDirectory, err
 	}
 	// Check if all resources are ready
-	err = m.verifyResourcesStatus(opts.Resources)
+	err = m.verifyResourcesStatus(opts.IgnoreResources, opts.Resources)
 	if err != nil {
 		return backupDirectory, err
+	}
+	// Apply the version-related patch, on the rollout nodes
+	allNodes := []core_v1.Node{}
+	allNodes = append(allNodes, rolloutNodes...)
+	allNodes = append(allNodes, otherNodes...)
+	nodeResources := convertToStreamlinerResource(allNodes)
+	err = m.applyVersionPatch(nodeResources, projectOptions, dryRun)
+	if err != nil {
+		return
 	}
 	logger.Info("The canary realease is now complete.")
 	return backupDirectory, err

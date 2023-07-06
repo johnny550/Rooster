@@ -84,15 +84,16 @@ func (suite *Readertest) TestReadFileSuccess() {
 	defer logger.Sync()
 	ref, err := worker.ReadManifestFiles(logger, path, ns)
 	expectedResource := worker.Resource{
-		Name:      "nginx",
-		Kind:      "Pod",
-		Manifest:  path + "file-2.yaml",
-		Namespace: ns,
-		Ready:     false,
+		ApiVersion: "v1",
+		Name:       "nginx",
+		Kind:       "Pod",
+		Manifest:   path + "file-2.yaml",
+		Namespace:  ns,
+		Ready:      false,
 	}
 	assert.Nil(suite.T(), err)
 	assert.NotEmpty(suite.T(), ref)
-	assert.Equal(suite.T(), ref, []worker.Resource{expectedResource})
+	assert.Equal(suite.T(), []worker.Resource{expectedResource}, ref)
 }
 
 func (suite *Readertest) TestReadFileContainingMultipleResources() {
@@ -101,22 +102,24 @@ func (suite *Readertest) TestReadFileContainingMultipleResources() {
 	defer logger.Sync()
 	ref, err := worker.ReadManifestFiles(logger, path, ns)
 	expectedResource1 := worker.Resource{
-		Name:      "busybox",
-		Kind:      "Pod",
-		Manifest:  path + "file-3.yaml",
-		Namespace: ns,
-		Ready:     false,
+		ApiVersion: "v1",
+		Name:       "busybox",
+		Kind:       "Pod",
+		Manifest:   path + "file-3.yaml",
+		Namespace:  ns,
+		Ready:      false,
 	}
 	expectedResource2 := worker.Resource{
-		Name:      "istio-ca-root-cert",
-		Kind:      "ConfigMap",
-		Manifest:  path + "file-3.yaml",
-		Namespace: ns,
-		Ready:     false,
+		ApiVersion: "v1",
+		Name:       "istio-ca-root-cert",
+		Kind:       "ConfigMap",
+		Manifest:   path + "file-3.yaml",
+		Namespace:  ns,
+		Ready:      false,
 	}
 	assert.Nil(suite.T(), err)
 	assert.NotEmpty(suite.T(), ref)
-	assert.Equal(suite.T(), ref, []worker.Resource{expectedResource1, expectedResource2})
+	assert.Equal(suite.T(), []worker.Resource{expectedResource1, expectedResource2}, ref)
 }
 
 func TestReader(t *testing.T) {

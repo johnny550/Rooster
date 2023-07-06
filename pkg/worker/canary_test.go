@@ -41,13 +41,19 @@ func (suite *CanaryTest) TestInvalidCanary() {
 	m := Manager{
 		kcm: *manager,
 	}
-	options := RolloutOptions{
+	prjOpts := ProjectOptions{
+		Project:        "canary-roll",
+		DesiredVersion: "vtest",
+	}
+	options := RoosterOptions{
 		Strategy:             "canary",
 		NodesWithTargetlabel: core_v1.NodeList{},
 		Canary:               0,
 		Namespace:            "test-rooster",
+		CanaryLabel:          "test-canary-label",
+		ProjectOpts:          prjOpts,
 	}
-	expectedErr := errors.New("You may want to review the canary/increment.")
+	expectedErr := errors.New("all nodes already carry the control label")
 	_, err = m.performCanaryRollout(options)
 	assert.NotNil(suite.T(), err)
 	assert.Equal(suite.T(), expectedErr, err)
@@ -72,13 +78,18 @@ func (suite *CanaryTest) TestCanaryWrongNode() {
 	sampleNodeList := core_v1.NodeList{
 		Items: sampleNodes,
 	}
-	options := RolloutOptions{
+	prjOpts := ProjectOptions{
+		Project:        "canary-roll",
+		DesiredVersion: "vtest",
+	}
+	options := RoosterOptions{
 		Strategy:             "canary",
 		NodesWithTargetlabel: sampleNodeList,
 		Canary:               10,
 		Namespace:            "test-rooster",
 		DryRun:               true,
 		CanaryLabel:          "my-canary=label",
+		ProjectOpts:          prjOpts,
 	}
 	_, err = m.performCanaryRollout(options)
 	// The sample nodes do not exist in the clusters. Patching them will be impossible.
