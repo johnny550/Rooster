@@ -21,37 +21,38 @@ import (
 
 	"rooster/pkg/utils"
 
-	"go.uber.org/zap"
+	k8s_errors "k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func getAttribute(d string, i int) (attribute string) {
 	data := strings.Split(d, ",")
-	// i=0 : Kind
-	// i=1 : Name
 	attribute = data[i]
 	return
 }
 
-func (c Clients) queryResources(logger *zap.Logger, verb utils.Verb, targetResources map[string]string, dryRun bool) (allExist bool, resources []unstructured.Unstructured) {
+func (m *Manager) queryResources(verb utils.Verb, targetResources []Resource, dryRun bool) (resources []unstructured.Unstructured, err error) {
+	logger := m.kcm.Logger
 	resources = []unstructured.Unstructured{}
-	allExist = true
-	for kindName, namespace := range targetResources {
-		kind := getAttribute(kindName, 0)
-		name := getAttribute(kindName, 1)
+	for _, currRes := range targetResources {
+		kind := currRes.Kind
+		name := currRes.Name
+		namespace := currRes.Namespace
 		switch verb {
 		case utils.Get:
-			resource, err := c.getResource(kind, name, namespace)
+			resource, err := m.getResource(kind, name, namespace)
 			if resource != nil {
 				resources = append(resources, *resource)
 			}
 			if err != nil {
-				logger.Warn(err.Error())
-				allExist = false
+				return resources, err
 			}
 		case utils.Delete:
-			c.deleteResource(kind, name, namespace, dryRun)
+			_, err := m.deleteResource(kind, name, namespace, dryRun)
+			if err != nil && !k8s_errors.IsNotFound(err) {
+				return resources, err
+			}
 		case utils.Update:
 			logger.Warn("Update not defined yet...")
 		case utils.Create:
@@ -65,34 +66,34 @@ func (c Clients) queryResources(logger *zap.Logger, verb utils.Verb, targetResou
 	return
 }
 
-func (c Clients) getResource(kind string, name string, namespace string) (resource *unstructured.Unstructured, err error) {
+func (m *Manager) getResource(kind string, name string, namespace string) (resource *unstructured.Unstructured, err error) {
 	switch kind {
 	case "Service":
-		resource, err = utils.GetService(c.K8sClient, namespace, name)
+		resource, err = utils.GetService(m.kcm, namespace, name)
 	case "DaemonSet":
-		resource, err = utils.GetDaemonSet(c.K8sClient, namespace, name)
+		resource, err = utils.GetDaemonSet(m.kcm, namespace, name)
 	case "ConfigMap":
-		resource, err = utils.GetConfigMap(c.K8sClient, namespace, name)
+		resource, err = utils.GetConfigMap(m.kcm, namespace, name)
 	case "ServiceAccount":
-		resource, err = utils.GetServiceAccount(c.K8sClient, namespace, name)
+		resource, err = utils.GetServiceAccount(m.kcm, namespace, name)
 	}
 	return
 }
 
-func (c Clients) deleteResource(kind string, name string, namespace string, dryRun bool) (opComplete bool, err error) {
+func (m *Manager) deleteResource(kind string, name string, namespace string, dryRun bool) (opComplete bool, err error) {
 	customDeleteOptions := meta_v1.DeleteOptions{}
 	if dryRun {
 		customDeleteOptions.DryRun = append(customDeleteOptions.DryRun, "All")
 	}
 	switch kind {
 	case "Service":
-		opComplete, err = utils.DeleteService(c.K8sClient, namespace, name, customDeleteOptions)
+		opComplete, err = utils.DeleteService(m.kcm, namespace, name, customDeleteOptions)
 	case "DaemonSet":
-		opComplete, err = utils.DeleteDaemonSet(c.K8sClient, namespace, name, customDeleteOptions)
+		opComplete, err = utils.DeleteDaemonSet(m.kcm, namespace, name, customDeleteOptions)
 	case "ConfigMap":
-		opComplete, err = utils.DeleteConfigMap(c.K8sClient, namespace, name, customDeleteOptions)
+		opComplete, err = utils.DeleteConfigMap(m.kcm, namespace, name, customDeleteOptions)
 	case "ServiceAccount":
-		opComplete, err = utils.DeleteServiceAccount(c.K8sClient, namespace, name, customDeleteOptions)
+		opComplete, err = utils.DeleteServiceAccount(m.kcm, namespace, name, customDeleteOptions)
 	}
 	return
 }

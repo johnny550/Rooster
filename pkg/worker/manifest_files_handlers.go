@@ -20,6 +20,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"time"
 
 	"rooster/pkg/config"
 	"rooster/pkg/utils"
@@ -28,20 +29,37 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func readmanifestFiles(logger *zap.Logger, manifestPath string, indicatedNamespace string) (objectReference map[string]string) {
-	// map of kind,name: namespace ---- Service,kube-dns-upstream:kube-system
-	objectReference = make(map[string]string)
-	// navigate to the indicated file
+type Resource struct {
+	Name      string
+	Namespace string
+	Manifest  string
+	Kind      string
+	Ready     bool
+}
+
+func ReadManifestFiles(logger *zap.Logger, manifestPath string, indicatedNamespace string) (objectReference []Resource, err error) {
+	logger.Info("Reading from " + manifestPath)
+	// navigate to the indicated folder
 	files, err := os.ReadDir(manifestPath)
 	if err != nil {
-		logger.Error(err.Error())
+		return
 	}
 	for _, file := range files {
+		myResource := Resource{}
 		data := basicK8sConfiguration{}
-		logger.Info("Reading file: " + file.Name())
+		myResource.Manifest = manifestPath + file.Name()
+		logger.Info("Reading file: " + myResource.Manifest)
+		fileInfo, err := os.Stat(manifestPath + file.Name())
+		if err != nil {
+			return nil, err
+		}
+		if fileInfo.Size() == 0 {
+			logger.Warn(file.Name() + " is empty")
+			continue
+		}
 		f, err := os.Open(manifestPath + file.Name())
 		if err != nil {
-			logger.Error(err.Error())
+			return nil, err
 		}
 		d := yaml.NewDecoder(f)
 		for {
@@ -55,51 +73,50 @@ func readmanifestFiles(logger *zap.Logger, manifestPath string, indicatedNamespa
 				break
 			}
 			if err != nil {
-				logger.Panic(err.Error())
+				return nil, err
 			}
-			kind := data.Kind
-			name := data.Metadata.Name
-			namespace := data.Metadata.Namespace
-			ns, err := determineNamespace(namespace, indicatedNamespace)
+			namespaceInManifest := data.Metadata.Namespace
+			ns, err := DetermineNamespace(namespaceInManifest, indicatedNamespace)
 			if err != nil {
-				logger.Panic(err.Error())
+				return nil, err
 			}
-			objectReference[kind+","+name] = ns
+			myResource.Kind = data.Kind
+			myResource.Name = data.Metadata.Name
+			myResource.Namespace = ns
+			objectReference = append(objectReference, myResource)
 		}
 	}
-	return objectReference
+	return objectReference, err
 }
 
-func backupResources(logger *zap.Logger, targetResources map[string]string) (OpComplete bool, backupDir string) {
-	backupDir = config.Env.BackupDirectory
+func backupResources(logger *zap.Logger, targetResources []Resource, cluster string) (backupDirFullName string, err error) {
+	backupDir := config.Env.BackupDirectory
 	if backupDir == "" {
+		return "", errors.New("Backup directory not found")
+	}
+	if len(targetResources) == 0 {
+		return backupDirFullName, errors.New("No resources to back up")
+	}
+	ts := time.Now().Format("2006.01.02_15:04:05")
+	backupDirFullName = backupDir + "/" + cluster + "/" + ts
+	if err = os.MkdirAll(backupDirFullName, os.ModePerm); err != nil {
 		return
 	}
-	if err := os.Mkdir(backupDir, os.ModePerm); err != nil {
-		if !errors.Is(err, os.ErrExist) {
-			logger.Error(err.Error())
-			return
-		}
-		logger.Warn(err.Error())
-	}
-	logger.Info("Created backup directory at " + backupDir)
-	for kindName, namespace := range targetResources {
-		kind := getAttribute(kindName, 0)
-		name := getAttribute(kindName, 1)
-		fileName := backupDir + "/" + kind + "_" + name + ".yaml"
-
-		cmd, err := utils.Kubectl(namespace, "get", kind, name, "-oyaml>"+fileName)
+	logger.Info("Created backup directory at " + backupDirFullName)
+	for _, currRes := range targetResources {
+		fileName := backupDirFullName + "/" + currRes.Kind + "_" + currRes.Name + ".yaml"
+		cmd, err := utils.KubectlEmulator(currRes.Namespace, "get", currRes.Kind, currRes.Name, "--ignore-not-found=true -oyaml>"+fileName)
 		if err != nil {
-			logger.Error(cmd)
-			return
+			// cmd is the command itself
+			logger.Info(cmd)
+			return "", err
 		}
 	}
-	OpComplete = true
 	logger.Info("Resource backup complete.")
 	return
 }
 
-func checkDirectoryExistence(path string) (exists bool) {
+func CheckDirectoryExistence(path string) (exists bool) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		exists = true
 	}

@@ -18,10 +18,12 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 
+	core_v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -37,7 +39,7 @@ func Shell(format string, args ...interface{}) (string, error) {
 	return sh(context.Background(), format, args...)
 }
 
-func Kubectl(namespace, subcommand string, args ...string) (string, error) {
+func KubectlEmulator(namespace, subcommand string, args ...string) (string, error) {
 	var cmd string
 	rest := strings.Join(args, " ")
 	switch len(args) {
@@ -51,7 +53,7 @@ func Kubectl(namespace, subcommand string, args ...string) (string, error) {
 	return Shell(cmd)
 }
 
-func UnsafeGuessGroupVersionResource(apiVersion string, kind string) (*schema.GroupVersionResource, error) {
+func UnsafeGuessGroupVersionResource(apiVersion, kind string) (*schema.GroupVersionResource, error) {
 	// get group version
 	groupVersion, err := schema.ParseGroupVersion(apiVersion)
 	if err != nil {
@@ -66,4 +68,30 @@ func UnsafeGuessGroupVersionResource(apiVersion string, kind string) (*schema.Gr
 	})
 
 	return &plural, nil
+}
+
+func ValidateTestOptions(testPackage, testBinary string) (skip bool, err error) {
+	// If the test related options were not specified, skip tests
+	if testPackage == "" && testBinary == "" {
+		skip = true
+		return
+	}
+	if testPackage == "" {
+		err = errors.New("test package not defined")
+		return
+	}
+	if testBinary == "" {
+		err = errors.New("test binary not defined")
+		return
+	}
+	return
+}
+
+// Ensures the nodes that will be targeted for a rollout (batchNodes), are not as many as nodes carrying the target label.
+// With this method, Rooster denies Canary, or increment values equal to 100%
+func MatchBatch(nodesWithTargetLabel, batchNodes []core_v1.Node) (err error) {
+	if len(nodesWithTargetLabel) == len(batchNodes) {
+		err = errors.New("The batch size cannot be equal to the total number of nodes to consider for the rollout. It must be inferior to the latter.")
+	}
+	return
 }

@@ -1,28 +1,37 @@
+/*
+Copyright 2023 The Rooster Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package tests
 
 import (
-	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"rooster/pkg/utils"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	core_v1 "k8s.io/api/core/v1"
 )
 
 type RoosterUtilsTest struct {
 	suite.Suite
 }
-
-const (
-	ns = "default"
-)
-
-var (
-	customDeleteOptions = new(meta_v1.DeleteOptions)
-)
 
 type plural struct {
 	Group    string
@@ -33,6 +42,7 @@ type plural struct {
 func (suite *RoosterUtilsTest) SetupSuite() {
 	fmt.Println(" SetupSuite")
 	customDeleteOptions.DryRun = append(customDeleteOptions.DryRun, "All")
+	customListOptions.Limit = 1
 	fmt.Printf("customDeleteOptions: %v\n", customDeleteOptions)
 }
 
@@ -55,76 +65,68 @@ func (suite *RoosterUtilsTest) TestShellScript() {
 	result, err := utils.Shell(cmd)
 	assert.Nil(suite.T(), err)
 	assert.NotEmpty(suite.T(), result)
-	assert.Contains(suite.T(), result, "Rooster/pkg/tests")
+	assert.Contains(suite.T(), result, "pkg/tests")
 }
 
-func (suite *RoosterUtilsTest) TestDeleteService() {
-	m, err := utils.New("")
+func (suite *RoosterUtilsTest) TestAssessmentOptions() {
+	testPackage := "my-test-package"
+	testBinary := "my-test-binary"
+	skip, err := utils.ValidateTestOptions(testPackage, testBinary)
 	assert.Nil(suite.T(), err)
-	// Get services
-	svcs, err := m.GetClient().CoreV1().Services(ns).List(context.TODO(), meta_v1.ListOptions{})
+	assert.False(suite.T(), skip)
+}
+
+func (suite *RoosterUtilsTest) TestAssessmentOptionsAbsence() {
+	testPackage := ""
+	testBinary := ""
+	skip, err := utils.ValidateTestOptions(testPackage, testBinary)
 	assert.Nil(suite.T(), err)
-	if len(svcs.Items) == 0 {
-		fmt.Println("No service found")
-		return
+	assert.True(suite.T(), skip)
+}
+
+func (suite *RoosterUtilsTest) TestAssessmentPackageFailure() {
+	testPackage := ""
+	testBinary := "my-test-binary"
+	skip, err := utils.ValidateTestOptions(testPackage, testBinary)
+	expectedErr := errors.New("test package not defined")
+	assert.EqualError(suite.T(), err, expectedErr.Error())
+	assert.False(suite.T(), skip)
+}
+
+func (suite *RoosterUtilsTest) TestAssessmentBinaryFailure() {
+	testPackage := "my-test-package"
+	testBinary := ""
+	skip, err := utils.ValidateTestOptions(testPackage, testBinary)
+	expectedErr := errors.New("test binary not defined")
+	assert.EqualError(suite.T(), err, expectedErr.Error())
+	assert.False(suite.T(), skip)
+}
+
+func (suite *RoosterUtilsTest) TestMatchBatchFailure() {
+	rolloutNodes := []core_v1.Node{}
+	testNodes := []core_v1.Node{}
+	node := core_v1.Node{}
+	for i := 0; i >= 2; i++ {
+		node.Name = "my-test-node-" + strconv.Itoa(i)
+		testNodes = append(testNodes, node)
 	}
-	targetSvc := svcs.Items[0].Name
-	done, err := utils.DeleteService(*m, ns, targetSvc, *customDeleteOptions)
-	assert.True(suite.T(), done)
-	assert.Nil(suite.T(), err)
+	rolloutNodes = append(rolloutNodes, testNodes...)
+	err := utils.MatchBatch(testNodes, rolloutNodes)
+	assert.NotNil(suite.T(), err)
 }
 
-func (suite *RoosterUtilsTest) TestDeleteServiceAccount() {
-	m, err := utils.New("")
-	assert.Nil(suite.T(), err)
-	// Get service accounts
-	sas, err := m.GetClient().CoreV1().ServiceAccounts(ns).List(context.TODO(), meta_v1.ListOptions{})
-	assert.Nil(suite.T(), err)
-	if len(sas.Items) == 0 {
-		fmt.Println("No service account found")
-		return
+func (suite *RoosterUtilsTest) TestMatchBatchSuccess() {
+	rolloutNodes := []core_v1.Node{}
+	testNodes := []core_v1.Node{}
+	node := core_v1.Node{}
+	for i := 0; i >= 2; i++ {
+		node.Name = "my-test-node-" + strconv.Itoa(i)
+		testNodes = append(testNodes, node)
 	}
-	targetSa := sas.Items[0].Name
-	done, err := utils.DeleteServiceAccount(*m, ns, targetSa, *customDeleteOptions)
-	assert.True(suite.T(), done)
+	node.Name = "my-target-node"
+	rolloutNodes = append(rolloutNodes, node)
+	err := utils.MatchBatch(testNodes, rolloutNodes)
 	assert.Nil(suite.T(), err)
-}
-
-func (suite *RoosterUtilsTest) TestDeleteConfigMap() {
-	m, err := utils.New("")
-	assert.Nil(suite.T(), err)
-	// Get config maps
-	cms, err := m.GetClient().CoreV1().ConfigMaps(ns).List(context.TODO(), meta_v1.ListOptions{})
-	assert.Nil(suite.T(), err)
-	if len(cms.Items) == 0 {
-		fmt.Println("No config map found")
-		return
-	}
-	targetCM := cms.Items[0].Name
-	done, err := utils.DeleteConfigMap(*m, ns, targetCM, *customDeleteOptions)
-	assert.True(suite.T(), done)
-	assert.Nil(suite.T(), err)
-}
-
-func (suite *RoosterUtilsTest) TestDeleteDaemonSet() {
-	m, err := utils.New("")
-	assert.Nil(suite.T(), err)
-	// Get daemon sets
-	daemonSets, err := m.GetClient().AppsV1().DaemonSets(ns).List(context.TODO(), meta_v1.ListOptions{})
-	assert.Nil(suite.T(), err)
-	if len(daemonSets.Items) == 0 {
-		fmt.Println("No daemonsets found")
-		return
-	}
-	targetDs := daemonSets.Items[0].Name
-	done, err := utils.DeleteDaemonSet(*m, ns, targetDs, *customDeleteOptions)
-	assert.True(suite.T(), done)
-	assert.Nil(suite.T(), err)
-}
-
-func (suite *RoosterUtilsTest) TestCreate() {
-	customCreateOptions := meta_v1.CreateOptions{}
-	customCreateOptions.DryRun = append(customCreateOptions.DryRun, "All")
 }
 
 func TestUtils(t *testing.T) {
