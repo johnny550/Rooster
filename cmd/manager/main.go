@@ -36,7 +36,7 @@ func gatherOptions() (dryRun bool, manifestPath string, targetLabel string, cana
 	flag.StringVar(&strategy, "strategy", "", "Desired rollout strategy. Canary | linear")
 	flag.BoolVar(&updateIfExists, "update-if-exists", false, "Update existing resources")
 	flag.IntVar(&increment, "increment", 0, "Rollout increment over time. In percentage")
-	flag.IntVar(&decrement, "decrement", 0, "Rollback increment over time. In percentage")
+	flag.IntVar(&decrement, "decrement", 0, "Scale-down decrement. In percentage")
 	flag.Parse()
 	return
 }
@@ -71,6 +71,8 @@ func printOptions(roosterOpts worker.RoosterOptions, logger *zap.Logger) {
 		printRollbackOptions(action, version, decrement, logger)
 	case "update":
 		printUpdateOptions(action, version, increment, logger)
+	case "scale-down":
+		printScaleDownOptions(action, decrement, logger)
 	}
 	logger.Sugar().Infof("Manifest path: %s", manifestPath)
 	logger.Sugar().Infof("Target label: %s", targetLabel)
@@ -106,6 +108,11 @@ func printUpdateOptions(action, version string, increment int, logger *zap.Logge
 	logger.Sugar().Infof("Action: %s", action)
 	logger.Sugar().Infof("Update target: %s", version)
 	logger.Sugar().Infof("Update increment: %d%%", increment)
+}
+
+func printScaleDownOptions(action string, decrement int, logger *zap.Logger) {
+	logger.Sugar().Infof("Action: %s", action)
+	logger.Sugar().Infof("Scaling decrement: %d%%", decrement)
 }
 
 func createClientManager(kubeconfigPath string) (cm *utils.K8sClientManager, err error) {
