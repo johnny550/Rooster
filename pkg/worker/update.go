@@ -53,17 +53,12 @@ func UpdateRollout(kubernetesClientManager *utils.K8sClientManager, opts Rooster
 	namespace := opts.Namespace
 	ignoreResources := opts.IgnoreResources
 	action := opts.Action
+	targetLabel := opts.TargetLabel
 	cmResourcePrj := makeCMName(projectName)
 	// get the cm and extract its content
 	cmdata, err := m.retrieveConfigMapContent(cmResourcePrj)
 	if err != nil {
 		return
-	}
-	// When updating:
-	// - having previous ACTIVE versions: NOT ALLOWED
-	// - having a current version not fully rolled out: NOT ALLOWED
-	if err := m.CheckPreviousVersions(cmdata, projectName, action); err != nil {
-		return err
 	}
 	// Get the current version
 	currentVersion, err := m.getCurrentVersion(projectName, cmdata)
@@ -74,6 +69,15 @@ func UpdateRollout(kubernetesClientManager *utils.K8sClientManager, opts Rooster
 	// The desired version cannot be the current one. Otherwise the operation should be a ROLLOUT
 	if currentVersion == desiredVersion {
 		return fmt.Errorf("version disparity required. Current: %v - Desired: %v", currentVersion, desiredVersion)
+	}
+	// When updating:
+	// - having previous ACTIVE versions: NOT ALLOWED
+	// - having a current version not fully rolled out: NOT ALLOWED
+	if err := m.CheckPreviousVersions(cmdata, projectName, action); err != nil {
+		return err
+	}
+	if err := m.CheckCurrentVersion(cmdata, projectName, targetLabel, action); err != nil {
+		return err
 	}
 	customOptions := meta_v1.ListOptions{}
 	customOptions.LabelSelector = controlLabel

@@ -121,8 +121,8 @@ func ProceedToDeployment(kubernetesClientManager *utils.K8sClientManager, rollou
 	// Create the config map
 	cmLabels := utils.ComposeConfigMapLabels()
 	data := utils.ComposeConfigMapData(action, project, version, nodes.Items, cmdata)
-	cm := utils.ComposeConfigMap(defaultNs, newCmName, cmLabels, data)
 	if cmIsNotFound {
+		cm := utils.ComposeConfigMap(defaultNs, newCmName, cmLabels, data)
 		_, err = m.createConfigMap(defaultNs, *cm, dryRun)
 		return
 	}
