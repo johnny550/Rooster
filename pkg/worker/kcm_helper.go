@@ -497,6 +497,42 @@ func (m *Manager) CheckPreviousVersions(cmdata utils.CmData, projectName, action
 	return nil
 }
 
+// Ensures the current version is fully rolled out
+func (m *Manager) CheckCurrentVersion(cmdata utils.CmData, projectName, targetLabel, action string) (err error) {
+	// get nodes flagged with the target label
+	customOptions := meta_v1.ListOptions{}
+	customOptions.LabelSelector = targetLabel
+	unstructNodes, err := m.getNodes(customOptions)
+	if err != nil {
+		return err
+	}
+	targetNodes := utils.MakeNodeList(unstructNodes)
+	vd := m.ExtractCurrentVersionDetails(projectName, cmdata)
+	if len(vd) != 1 {
+		return fmt.Errorf("number of supported current version for project %s is 1. %s failed", projectName, action)
+	}
+	nodesWithCurrVrs := []string{}
+	currVrs := ""
+	// vrs: current version
+	// n: node names
+	for vrs, n := range vd {
+		currVrs = vrs
+		nodesWithCurrVrs = strings.Split(n, ",")
+	}
+	targetNodeNames := utils.MakeNodeNames(targetNodes)
+	sort.Slice(nodesWithCurrVrs, func(i, j int) bool {
+		return nodesWithCurrVrs[i] < nodesWithCurrVrs[j]
+	})
+	sort.Slice(targetNodeNames, func(i, j int) bool {
+		return targetNodeNames[i] < targetNodeNames[j]
+	})
+	// what we want: nodes with current version = given targetNodes (All nodes with control/canary label)
+	if !reflect.DeepEqual(nodesWithCurrVrs, targetNodeNames) {
+		err = fmt.Errorf("the current version %s isn't fully rolled out. %s failed", currVrs, action)
+	}
+	return
+}
+
 /**
 * Receives a project name and a struct of type CmData
 * Determines the current version of a given project based off the also given data.
