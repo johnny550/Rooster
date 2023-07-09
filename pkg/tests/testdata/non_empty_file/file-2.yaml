@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  namespace: default
+spec:
+  containers:
+  - command:
+    - sleep
+    - infinity
+    image: nginx
+    imagePullPolicy: IfNotPresent
+    name: nginx
+  restartPolicy: Always

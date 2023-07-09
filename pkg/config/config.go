@@ -22,8 +22,17 @@ import (
 )
 
 type Config struct {
-	DeployerVersion string `default:"1.0.0" split_words:"true"`
-	BackupDirectory string `default:"/tmp/backup_for_canary"`
+	ApiVersionCoreV1       string `default:"v1"`
+	BackupDirectory        string `default:"/tmp/streamliner_backup"`
+	DefaultNamespace       string `default:"default"`
+	CmName                 string `default:"str-versioning-cache"`
+	CmKind                 string `default:"ConfigMap"`
+	CmOwnerTag             string `default:"responsible.unit=streamliner"`
+	DefaultRolloutStrategy string `default:"linear"`
+	Delimiter              string `default:"__"`
+	DeployerVersion        string `default:"1.0.0" split_words:"true"`
+	LabelPrefix            string `default:"deploy.streamliner"`
+	NodeKind               string `default:"Node"`
 }
 
 var Env Config

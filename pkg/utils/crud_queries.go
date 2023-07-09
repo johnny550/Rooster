@@ -17,91 +17,56 @@ limitations under the License.
 package utils
 
 import (
-	"context"
-
-	"go.uber.org/zap"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 )
 
-var (
-	logger = new(zap.Logger)
-)
-
-func init() {
-	logger, _ = zap.NewProduction()
+// Dynamic queries
+func (m *K8sClientManager) PatchResourcesDynamically(apiVersion string, kind string, namespace string, name string, patchType types.PatchType, patchData []byte, patchOpts meta_v1.PatchOptions) (
+	updatedResource *unstructured.Unstructured, err error) {
+	opts := DynamicQueryOptions{
+		PatchData:    patchData,
+		PatchType:    patchType,
+		PatchOptions: patchOpts,
+	}
+	updatedResource, err = m.Execute(Patch, apiVersion, kind, namespace, name, opts)
+	if err != nil {
+		return updatedResource, err
+	}
+	m.Logger.Sugar().Infof("Patched %s %s", kind, name)
+	return updatedResource, err
 }
 
-// --------------------- READ -------------------------------
-func GetService(clt K8sClient, namespace string, name string) (svc *unstructured.Unstructured, err error) {
-	logger.Info("Getting service " + name + " from namespace " + namespace)
-	apiVersion := "v1"
-	kind := "Service"
-	svc, err = clt.Execute(Get, apiVersion, kind, namespace, name)
+func (m *K8sClientManager) GetResourcesDynamically(apiVersion, kind, namespace, name string, getOpts meta_v1.GetOptions) (res *unstructured.Unstructured, err error) {
+	opts := DynamicQueryOptions{
+		GetOptions: getOpts,
+	}
+	res, err = m.Execute(Get, apiVersion, kind, namespace, name, opts)
+	if err != nil {
+		return nil, err
+	}
 	return
 }
 
-func GetDaemonSet(clt K8sClient, namespace string, name string) (ds *unstructured.Unstructured, err error) {
-	logger.Info("Getting daemonset " + name + " from namespace " + namespace)
-	apiVersion := "apps/v1"
-	kind := "DaemonSet"
-	ds, err = clt.Execute(Get, apiVersion, kind, namespace, name)
+func (m *K8sClientManager) DeleteResourcesDynamically(apiVersion, kind, namespace, name string, deleteOpts meta_v1.DeleteOptions) (res *unstructured.Unstructured, err error) {
+	opts := DynamicQueryOptions{
+		DeleteOptions: deleteOpts,
+	}
+	_, err = m.Execute(Delete, apiVersion, kind, namespace, name, opts)
+	if err != nil {
+		return nil, err
+	}
 	return
 }
 
-func GetConfigMap(clt K8sClient, namespace string, name string) (cm *unstructured.Unstructured, err error) {
-	logger.Info("Getting config map " + name + " from namespace " + namespace)
-	apiVersion := "v1"
-	kind := "ConfigMap"
-	cm, err = clt.Execute(Get, apiVersion, kind, namespace, name)
+func (m *K8sClientManager) ListResourcesDynamically(apiVersion, kind, namespace string, listOpts meta_v1.ListOptions) (objList *unstructured.UnstructuredList, err error) {
+	opts := DynamicQueryOptions{
+		ListOptions: listOpts,
+	}
+	objList, err = m.ExecuteList(List, apiVersion, kind, namespace, opts)
+	if err != nil {
+		return nil, err
+	}
 	return
-}
-
-func GetServiceAccount(clt K8sClient, namespace string, name string) (sa *unstructured.Unstructured, err error) {
-	logger.Info("Getting serviceAccount " + name + " from namespace " + namespace)
-	apiVersion := "v1"
-	kind := "ServiceAccount"
-	sa, err = clt.Execute(Get, apiVersion, kind, namespace, name)
-	return
-}
-
-// --------------------- DELETE ------------------------
-func DeleteService(clt K8sClient, namespace string, name string, customDeleteOptions meta_v1.DeleteOptions) (bool, error) {
-	ctx := context.TODO()
-	logger.Info("Deleting service " + name + " from namespace " + namespace)
-	err := clt.GetClient().CoreV1().Services(namespace).Delete(ctx, name, customDeleteOptions)
-	if err != nil {
-		return false, err
-	}
-	return true, err
-}
-
-func DeleteDaemonSet(clt K8sClient, namespace string, name string, customDeleteOptions meta_v1.DeleteOptions) (bool, error) {
-	ctx := context.TODO()
-	logger.Info("Deleting daemonset " + name + " from namespace " + namespace)
-	err := clt.GetClient().AppsV1().DaemonSets(namespace).Delete(ctx, name, customDeleteOptions)
-	if err != nil {
-		return false, err
-	}
-	return true, err
-}
-
-func DeleteConfigMap(clt K8sClient, namespace string, name string, customDeleteOptions meta_v1.DeleteOptions) (bool, error) {
-	ctx := context.TODO()
-	logger.Info("Deleting config map " + name + " from namespace " + namespace)
-	err := clt.GetClient().CoreV1().ConfigMaps(namespace).Delete(ctx, name, customDeleteOptions)
-	if err != nil {
-		return false, err
-	}
-	return true, err
-}
-
-func DeleteServiceAccount(clt K8sClient, namespace string, name string, customDeleteOptions meta_v1.DeleteOptions) (bool, error) {
-	ctx := context.TODO()
-	logger.Info("Deleting serviceAccount " + name + " from namespace " + namespace)
-	err := clt.GetClient().CoreV1().ServiceAccounts(namespace).Delete(ctx, name, customDeleteOptions)
-	if err != nil {
-		return false, err
-	}
-	return true, err
 }

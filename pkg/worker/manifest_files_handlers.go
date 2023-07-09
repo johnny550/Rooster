@@ -20,6 +20,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 
 	"rooster/pkg/config"
 	"rooster/pkg/utils"
@@ -28,20 +29,31 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func readmanifestFiles(logger *zap.Logger, manifestPath string, indicatedNamespace string) (objectReference map[string]string) {
-	// map of kind,name: namespace ---- Service,kube-dns-upstream:kube-system
-	objectReference = make(map[string]string)
-	// navigate to the indicated file
+func ReadManifestFiles(logger *zap.Logger, manifestPath string, indicatedNamespace string) (objectReference []Resource, err error) {
+	logger.Info("Reading from " + manifestPath)
+	if !strings.HasSuffix(manifestPath, "/") {
+		manifestPath = manifestPath + "/"
+	}
+	// navigate to the indicated folder
 	files, err := os.ReadDir(manifestPath)
 	if err != nil {
-		logger.Error(err.Error())
+		return
 	}
 	for _, file := range files {
+		myResource := Resource{}
 		data := basicK8sConfiguration{}
-		logger.Info("Reading file: " + file.Name())
+		myResource.Manifest = manifestPath + file.Name()
+		fileInfo, err := os.Stat(manifestPath + file.Name())
+		if err != nil {
+			return nil, err
+		}
+		if fileInfo.Size() == 0 {
+			logger.Warn(file.Name() + " is empty")
+			continue
+		}
 		f, err := os.Open(manifestPath + file.Name())
 		if err != nil {
-			logger.Error(err.Error())
+			return nil, err
 		}
 		d := yaml.NewDecoder(f)
 		for {
@@ -55,51 +67,62 @@ func readmanifestFiles(logger *zap.Logger, manifestPath string, indicatedNamespa
 				break
 			}
 			if err != nil {
-				logger.Panic(err.Error())
+				return nil, err
 			}
-			kind := data.Kind
-			name := data.Metadata.Name
-			namespace := data.Metadata.Namespace
-			ns, err := determineNamespace(namespace, indicatedNamespace)
+			namespaceInManifest := data.Metadata.Namespace
+			ns, err := utils.DetermineNamespace(namespaceInManifest, indicatedNamespace)
 			if err != nil {
-				logger.Panic(err.Error())
+				return nil, err
 			}
-			objectReference[kind+","+name] = ns
+			myResource.ApiVersion = data.ApiVersion
+			myResource.Kind = data.Kind
+			myResource.Name = data.Metadata.Name
+			myResource.Namespace = ns
+			myResource.UpdateStrategy = data.Spec.UpdateStrategy.StrategyType
+			objectReference = append(objectReference, myResource)
 		}
 	}
-	return objectReference
+	return objectReference, err
 }
 
-func backupResources(logger *zap.Logger, targetResources map[string]string) (OpComplete bool, backupDir string) {
-	backupDir = config.Env.BackupDirectory
-	if backupDir == "" {
+func backupResources(logger *zap.Logger, targetResources []Resource, cluster string, projectOptions ProjectOptions, ignoreResources bool) (backupDirFullName string, err error) {
+	backupDir := config.Env.BackupDirectory
+	projectName := projectOptions.Project
+	currentVersion := projectOptions.CurrVersion
+	if ignoreResources {
+		logger.Warn("Resources are ignored. Skipping backup operation.")
 		return
 	}
-	if err := os.Mkdir(backupDir, os.ModePerm); err != nil {
-		if !errors.Is(err, os.ErrExist) {
-			logger.Error(err.Error())
-			return
-		}
-		logger.Warn(err.Error())
+	if backupDir == "" {
+		return "", errors.New("backup directory not found")
 	}
-	logger.Info("Created backup directory at " + backupDir)
-	for kindName, namespace := range targetResources {
-		kind := getAttribute(kindName, 0)
-		name := getAttribute(kindName, 1)
-		fileName := backupDir + "/" + kind + "_" + name + ".yaml"
-
-		cmd, err := utils.Kubectl(namespace, "get", kind, name, "-oyaml>"+fileName)
+	if len(targetResources) == 0 {
+		return backupDirFullName, errors.New("no resources to back up")
+	}
+	nameComponents := []string{backupDir, cluster, projectName, currentVersion}
+	backupDirFullName = strings.Join(nameComponents, "/")
+	// TODO: do I need this?
+	// if found := CheckDirectoryExistence(backupDirFullName); found {
+	// 	err = errors.New("version backup already found")
+	// }
+	if err = os.MkdirAll(backupDirFullName, os.ModePerm); err != nil {
+		return
+	}
+	logger.Info("Created backup directory at " + backupDirFullName)
+	for _, currRes := range targetResources {
+		fileName := backupDirFullName + "/" + currRes.Kind + "_" + currRes.Name + ".yaml"
+		cmd, err := utils.KubectlEmulator(currRes.Namespace, "get", currRes.Kind, currRes.Name, "--ignore-not-found=true -oyaml>"+fileName)
 		if err != nil {
-			logger.Error(cmd)
-			return
+			// cmd is the command itself
+			logger.Info(cmd)
+			return "", err
 		}
 	}
-	OpComplete = true
 	logger.Info("Resource backup complete.")
 	return
 }
 
-func checkDirectoryExistence(path string) (exists bool) {
+func CheckDirectoryExistence(path string) (exists bool) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		exists = true
 	}
