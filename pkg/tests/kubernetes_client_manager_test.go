@@ -33,10 +33,16 @@ type KubernetesClientTest struct {
 	suite.Suite
 }
 
-func (suite *KubernetesClientTest) TestKubernetesClient() {
+func (suite *KubernetesClientTest) TestCreatingManager() {
+	manager, err := utils.New("")
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), manager)
+}
+
+func (suite *KubernetesClientTest) TestKubernetesClientManager() {
 	m, err := utils.New("")
 	assert.Nil(suite.T(), err)
-	_, err = m.GetClient().CoreV1().Pods("default").List(context.TODO(), meta_v1.ListOptions{})
+	_, err = m.Client.CoreV1().Pods("default").List(context.TODO(), meta_v1.ListOptions{})
 	assert.Nil(suite.T(), err)
 }
 
@@ -44,7 +50,7 @@ func (suite *KubernetesClientTest) TestKubernetesDynamicClientGet() {
 	svcName := "kube-dns"
 	m, err := utils.New("")
 	assert.Nil(suite.T(), err)
-	svc, err := m.Execute(utils.Get, "v1", "Service", "kube-system", svcName)
+	svc, err := m.Execute(utils.Get, "v1", "Service", "kube-system", svcName, utils.DynamicQueryOptions{})
 	assert.Nil(suite.T(), err)
 	assert.Equal(suite.T(), svc.GetName(), svcName)
 }
@@ -56,7 +62,7 @@ func (suite *KubernetesClientTest) TestKubernetesClientDelete() {
 	podLists, err := getPodsList(m, ns)
 	assert.Nil(suite.T(), err)
 	if len(podLists.Items) == 0 {
-		ns = "caas-sentinel"
+		ns = "kube-system"
 		podLists, err = getPodsList(m, ns)
 		assert.Nil(suite.T(), err)
 	}
@@ -68,7 +74,7 @@ func (suite *KubernetesClientTest) TestKubernetesClientDelete() {
 	customDeleteOptions.DryRun = append(customDeleteOptions.DryRun, "All")
 	fmt.Printf("target ns: %v\n", ns)
 	fmt.Printf("target Pod: %v\n", targetPod)
-	err = m.GetClient().CoreV1().Pods(ns).Delete(ctx, targetPod, customDeleteOptions)
+	err = m.Client.CoreV1().Pods(ns).Delete(ctx, targetPod, customDeleteOptions)
 	assert.Nil(suite.T(), err)
 }
 
@@ -79,7 +85,7 @@ func (suite *KubernetesClientTest) TestKubernetesDynamicClientDelete() {
 	podLists, err := getPodsList(m, ns)
 	assert.Nil(suite.T(), err)
 	if len(podLists.Items) == 0 {
-		ns = "caas-sentinel"
+		ns = "kube-system"
 		podLists, err = getPodsList(m, ns)
 		assert.Nil(suite.T(), err)
 	}
@@ -90,12 +96,12 @@ func (suite *KubernetesClientTest) TestKubernetesDynamicClientDelete() {
 	customDeleteOptions.DryRun = append(customDeleteOptions.DryRun, "All")
 	fmt.Printf("target ns: %v\n", ns)
 	fmt.Printf("target Pod: %v\n", targetPod)
-	_, err = m.Execute(utils.Delete, "v1", "Pod", ns, targetPod)
+	_, err = m.Execute(utils.Delete, "v1", "Pod", ns, targetPod, utils.DynamicQueryOptions{})
 	assert.Nil(suite.T(), err)
 }
 
-func getPodsList(c *utils.K8sClient, namespace string) (*core_v1.PodList, error) {
-	return c.GetClient().CoreV1().Pods(namespace).List(context.TODO(), meta_v1.ListOptions{})
+func getPodsList(c *utils.K8sClientManager, namespace string) (*core_v1.PodList, error) {
+	return c.Client.CoreV1().Pods(namespace).List(context.TODO(), meta_v1.ListOptions{})
 }
 
 func TestClient(t *testing.T) {

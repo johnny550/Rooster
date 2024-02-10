@@ -17,41 +17,51 @@ limitations under the License.
 package worker
 
 import (
-	"strings"
-
 	"rooster/pkg/utils"
 
-	"go.uber.org/zap"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8s_errors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func getAttribute(d string, i int) (attribute string) {
-	data := strings.Split(d, ",")
-	// i=0 : Kind
-	// i=1 : Name
-	attribute = data[i]
-	return
-}
-
-func (c Clients) queryResources(logger *zap.Logger, verb utils.Verb, targetResources map[string]string, dryRun bool) (allExist bool, resources []unstructured.Unstructured) {
+func (m *Manager) queryResources(verb utils.Verb, targetResources []Resource, dynamicOptions utils.DynamicQueryOptions) (resources []unstructured.Unstructured, err error) {
+	logger := m.kcm.Logger
 	resources = []unstructured.Unstructured{}
-	allExist = true
-	for kindName, namespace := range targetResources {
-		kind := getAttribute(kindName, 0)
-		name := getAttribute(kindName, 1)
+	for _, currRes := range targetResources {
+		kind := currRes.Kind
+		name := currRes.Name
+		namespace := currRes.Namespace
+		apiVersion := currRes.ApiVersion
 		switch verb {
 		case utils.Get:
-			resource, err := c.getResource(kind, name, namespace)
+			getOpts := dynamicOptions.GetOptions
+			resource, err := m.kcm.GetResourcesDynamically(apiVersion, kind, namespace, name, getOpts)
 			if resource != nil {
 				resources = append(resources, *resource)
 			}
 			if err != nil {
-				logger.Warn(err.Error())
-				allExist = false
+				return resources, err
 			}
 		case utils.Delete:
-			c.deleteResource(kind, name, namespace, dryRun)
+			deleteOpts := dynamicOptions.DeleteOptions
+			_, err := m.kcm.DeleteResourcesDynamically(apiVersion, kind, namespace, name, deleteOpts)
+			if err != nil && !k8s_errors.IsNotFound(err) {
+				return resources, err
+			}
+		case utils.Patch:
+			patchOpts := dynamicOptions.PatchOptions
+			patchType := dynamicOptions.PatchType
+			patchData := dynamicOptions.PatchData
+			_, err := m.kcm.PatchResourcesDynamically(apiVersion, kind, namespace, name, patchType, patchData, patchOpts)
+			if err != nil {
+				return resources, err
+			}
+		case utils.List:
+			listOpts := dynamicOptions.ListOptions
+			r, err := m.kcm.ListResourcesDynamically(apiVersion, kind, namespace, listOpts)
+			if err != nil {
+				return resources, err
+			}
+			resources = r.Items
 		case utils.Update:
 			logger.Warn("Update not defined yet...")
 		case utils.Create:
@@ -60,39 +70,21 @@ func (c Clients) queryResources(logger *zap.Logger, verb utils.Verb, targetResou
 			logger.Error("Verb is unknown")
 			return
 		}
-
 	}
 	return
 }
 
-func (c Clients) getResource(kind string, name string, namespace string) (resource *unstructured.Unstructured, err error) {
-	switch kind {
-	case "Service":
-		resource, err = utils.GetService(c.K8sClient, namespace, name)
-	case "DaemonSet":
-		resource, err = utils.GetDaemonSet(c.K8sClient, namespace, name)
-	case "ConfigMap":
-		resource, err = utils.GetConfigMap(c.K8sClient, namespace, name)
-	case "ServiceAccount":
-		resource, err = utils.GetServiceAccount(c.K8sClient, namespace, name)
+func (m *Manager) retrieveConfigMapContent(cmRes Resource) (cmdata utils.CmData, queryErr error) {
+	// get the cm
+	dynamicOpts := utils.DynamicQueryOptions{}
+	objs, queryErr := m.queryResources(utils.Get, []Resource{cmRes}, dynamicOpts)
+	if queryErr != nil {
+		return
 	}
-	return
-}
-
-func (c Clients) deleteResource(kind string, name string, namespace string, dryRun bool) (opComplete bool, err error) {
-	customDeleteOptions := meta_v1.DeleteOptions{}
-	if dryRun {
-		customDeleteOptions.DryRun = append(customDeleteOptions.DryRun, "All")
-	}
-	switch kind {
-	case "Service":
-		opComplete, err = utils.DeleteService(c.K8sClient, namespace, name, customDeleteOptions)
-	case "DaemonSet":
-		opComplete, err = utils.DeleteDaemonSet(c.K8sClient, namespace, name, customDeleteOptions)
-	case "ConfigMap":
-		opComplete, err = utils.DeleteConfigMap(c.K8sClient, namespace, name, customDeleteOptions)
-	case "ServiceAccount":
-		opComplete, err = utils.DeleteServiceAccount(c.K8sClient, namespace, name, customDeleteOptions)
+	// extract the cm's data
+	cmdata, queryErr = utils.ExtractConfigMapData(objs[0])
+	if queryErr != nil {
+		return
 	}
 	return
 }
